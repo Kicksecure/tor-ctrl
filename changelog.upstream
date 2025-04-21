@@ -1,3 +1,33 @@
+commit e6579d344d2246b3f62057595bfeb543fa7c2ed2
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Mon Apr 21 10:09:15 2025 -0400
+
+    refactoring
+
+commit 7761e5e17b1b686d589719d33b2fc109ad89b8cb
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Mon Apr 21 10:04:42 2025 -0400
+
+    refactoring
+
+commit 7959e522a757ae8f93bb50eb8a328c2de582919e
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Mon Apr 21 09:58:13 2025 -0400
+
+    validate onion_id_file
+
+commit 8d41f86642b51485d6d4b75935bd0bc63b06b600
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Mon Apr 21 09:41:49 2025 -0400
+
+    hardcode Tor cookie path to `/run/tor/control.authcookie` for better security
+
+commit 84ea21cbbd8556f15d88b3c06f59bfb5ff046bce
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Sat Apr 19 17:34:45 2025 +0000
+
+    bumped changelog version
+
 commit 96e34c6d6de7f6d2031534b2b493434ca42b9438
 Author: Patrick Schleizer <adrelanos@whonix.org>
 Date:   Sat Apr 19 12:24:07 2025 -0400
