@@ -1,0 +1,2 @@
+# TODO: Find a way to not need this, ronn may be outputting bad data?
+tor-ctrl: groff-message *usr/share/man/man8/tor-ctrl.8.gz*
