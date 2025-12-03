@@ -1,3 +1,9 @@
+tor-ctrl (3:6.3-1) unstable; urgency=medium
+
+  * New upstream version (local package).
+
+ -- Patrick Schleizer <adrelanos@whonix.org>  Wed, 03 Dec 2025 08:33:31 +0000
+
 tor-ctrl (3:6.2-1) unstable; urgency=medium
 
   * New upstream version (local package).

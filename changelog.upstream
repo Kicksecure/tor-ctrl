@@ -1,3 +1,38 @@
+commit 554b8edfe4b4fb15a054bedfc0cdaca8009b06ea
+Merge: 4534036 5a6625c
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Tue Dec 2 07:04:33 2025 -0500
+
+    Merge remote-tracking branch 'ArrayBolt3/arraybolt3/trixie'
+
+commit 5a6625c6bd8c846a87ab34d6a80263ae6f160c5f
+Author: Aaron Rainbolt <arraybolt3@ubuntu.com>
+Date:   Mon Dec 1 21:22:36 2025 -0600
+
+    Fix end-of-options parsing, make argument retrieval a bit cleaner
+    
+    The pattern '--*' in the argument parser was matching the
+    end-of-options string '--'. As a result, the string was collapsed to a
+    blank string in the parser but not in the argument list itself. This
+    triggered the parser to stop argument parsing, but without removing the
+    '--' string from the argument list, resulting in it being sent as a
+    command to the Tor daemon.
+    
+    To fix, change the patterns '--*' and '-*' in the parser to '--?*' and
+    '-?*', respectively. This makes the parser collapse '--' to '-', which
+    it later recognizes as an end-of-options indicator. This causes the
+    parser to remove '--' from the argument list before stopping argument
+    parsing.
+    
+    Also, stop assuming '$2' is always defined. We don't use 'set -u' in
+    tor-ctrl today, but we might in the future.
+
+commit 4534036ccfd93149e35c5d9b28d5c2fe420a4846
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Fri Sep 19 16:22:43 2025 +0000
+
+    bumped changelog version
+
 commit a432c68ba92824285f45a312f4ab0c278d7217b0
 Author: Patrick Schleizer <adrelanos@whonix.org>
 Date:   Thu Sep 18 10:08:29 2025 -0400
