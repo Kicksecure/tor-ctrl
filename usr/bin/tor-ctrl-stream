@@ -115,7 +115,7 @@ EOF
               #printf '\n%6s %-20s %-21s %6s %-20s %-62s\n' "ID" "Purpose" "Client" "CircID" "CircPurpose" "Target"
               printf "%s" "------------------------------------------------------------------------------------------------------"
             }
-            ## Stream purpose is unkown for tor-ctrl if it was an end of stream that we didn't catch the creation
+            ## Stream purpose is unknown for tor-ctrl if it was an end of stream that we didn't catch the creation
             ## unknown us being specified for proper field separation
             printf "%s\n" "${stream_id} ${stream_purpose:="UNKNOWN"} ${stream_client:="UNKNOWN"} ${circuit_id}  ${circuit_purpose} ${stream_target}" | tr -s " "
             #printf '%6s %-20s %-21s %6s %-20s %-62s\n' "${stream_id}" "${stream_purpose}" "${stream_client}" "${circuit_id}" "${circuit_purpose}" "${stream_target}" | tr -s " "

@@ -24,7 +24,7 @@ This package is produced independently of, and carries no guarantee from, The To
   * [Streams](#streams)
   * [Debugging](#debugging)
     * [Permission denied](#permission-denied)
-    * [Unkown](#unknown)
+    * [Unknown](#unknown)
 
 ## History
 
