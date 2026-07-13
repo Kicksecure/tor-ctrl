@@ -106,7 +106,8 @@ At least one of each item is necessary:
 
 Install the script and the manual:
 ```sh
-sudo ./configure.sh install
+sudo cp usr/bin/* /usr/bin/
+sudo cp auto-generated-man-pages/tor-ctrl.8 /usr/share/man/man8/
 ```
 
 ### How to build deb package from source sode
