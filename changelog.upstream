@@ -1,3 +1,33 @@
+commit fbafac2d8a53c3554facc9bf1a2ac157ab0bee71
+Merge: ad5bcac c4c75c0
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Tue Jul 21 06:28:13 2026 -0400
+
+    Merge remote-tracking branch 'refs/remotes/org-ai-assisted/master'
+
+commit c4c75c07604c3f0f6d32decb42fc9f0a37fa045d
+Author: assisted-by-ai (Bot Account) (Machine Account) <228987186+assisted-by-ai@users.noreply.github.com>
+Date:   Mon Jul 13 11:48:37 2026 -0400
+
+    remove configure.sh (unused by the build) (#1)
+
+    configure.sh was a manual convenience wrapper, not part of the build: the
+    Debian package is built by debhelper (debian/rules is 'dh $@'), and no CI
+    or genmkfile path invokes it. The man page it could regenerate is already
+    committed under auto-generated-man-pages/ (which debian/rules ships), so
+    nothing depends on its 'man' target.
+
+    Delete it and replace its only documented use -- the 'install on any unix
+    system' step in README.md -- with the equivalent plain cp commands.
+
+    Co-authored-by: claude (dev71 31548627-e7c1-43cd-bd41-8b0900c72576) <noreply@anthropic.com>
+
+commit ad5bcac4f729d4ba4e137bf3befcfebffabb24dc
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Thu Jul 2 06:34:54 2026 +0000
+
+    bumped changelog version
+
 commit 73bfd1c1a80358f9b0e490945c67c4bae0d6a3ab
 Author: Patrick Schleizer <adrelanos@whonix.org>
 Date:   Thu Jul 2 02:13:05 2026 -0400
