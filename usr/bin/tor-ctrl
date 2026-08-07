@@ -14,7 +14,17 @@
 ## to configure the control method (ControlPort/ControlSocket) and the
 ## authentication method (CookieAuthentication/HashedControlPassword).
 
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/strings.bsh
+## Sibling repo: absent in an isolated CI checkout, so shellcheck cannot
+## follow it there. The source= path above still documents where it lives.
+# shellcheck disable=SC1091
 source /usr/libexec/helper-scripts/strings.bsh
 
 ## script version
@@ -22,6 +32,39 @@ torctrl_version="5.0.0"
 
 ## script name
 me="${0##*/}"
+
+## Option flags and the environment-provided socket. Each is assigned only when
+## its option is passed, and every read below is a '[ -n ]' / '[ -z ]' test, so
+## initialising to empty keeps those tests reading exactly as they did before.
+##
+## TOR_CONTROL_HOST stays EMPTY rather than defaulting to 127.0.0.1: an empty
+## host with a set port is a supported case, which check_socket handles through
+## its dedicated '":"[0-9]*' arm.
+quiet=""
+machine_mode=""
+debug_mode=""
+torbrowser=""
+dry_run=""
+cmd_cli=""
+socket_found=""
+tor_control_socket=""
+tor_password=""
+wait_confirmation=""
+
+## Read by a '[ -z ]' guard BEFORE the search loop that assigns them, so the
+## "install one of these programs" errors are what must fire when nothing is
+## found -- not a nounset abort.
+socket_prog=""
+hex_prog=""
+
+## Assigned only on the branch that parses a TCP socket, but read on error
+## paths reachable from the unix-socket branch too. Empty is what these
+## expanded to before strict mode.
+tor_control_host=""
+tor_control_port=""
+tor_control_unix=""
+TOR_CONTROL_HOST="${TOR_CONTROL_HOST:-}"
+TOR_CONTROL_PORT="${TOR_CONTROL_PORT:-}"
 
 usage(){
   printf '%s\n' "usage: ${me}
@@ -111,6 +154,7 @@ error_msg(){
 
 ## dylanaraps/pfetch has function
 ## fail if program is not installed on path or not executable
+## style-ok: no-has -- this is the definition of 'has'; it cannot call itself.
 has() {
   _cmd=$(command -v "${1}") 2>/dev/null || return 1
   [ -x "${_cmd}" ] || return 1
@@ -125,8 +169,12 @@ check_progs(){
   [ -z "${socket_prog}" ] && error_msg "Install one of the following programs to connect to sockets: ${prog_net}"
 
   case "${socket_prog##*/}" in
-    telnet) : "${sleep_n:=1}";;
-    *) : "${sleep_n:=0}";;
+    telnet)
+      : "${sleep_n:=1}"
+      ;;
+    *)
+      : "${sleep_n:=0}"
+      ;;
   esac
 }
 
@@ -184,16 +232,30 @@ check_socket(){
         printf '%s\n' "${tor_control_port} is not a valid port, not an integer" | tee -a -- "${temp_dir}/fail.log" >/dev/null
         return 1
       }
-      { [ "${tor_control_port}" -gt 0 ] && [ "${tor_control_port}" -le 65535 ]; } || { printf '%s\n' "${tor_control_port} is not a valid port, not within range: 0-65535" | tee -a -- "${temp_dir}/fail.log" >/dev/null; return 1; }
+      { [ "${tor_control_port}" -gt 0 ] && [ "${tor_control_port}" -le 65535 ]; } || {
+        printf '%s\n' "${tor_control_port} is not a valid port, not within range: 0-65535" | tee -a -- "${temp_dir}/fail.log" >/dev/null
+        return 1
+      }
       tor_control_host="${socket%%:*}"
       { [ "${tor_control_host}" = "${tor_control_port}" ] || [ -z "${tor_control_host}" ]; } && tor_control_host="127.0.0.1"
       for quad in $(printf '%s\n' "${tor_control_host}" | tr "." " "); do
-        printf '%d' "${quad}" >/dev/null 2>&1 || { printf '%s\n' "${tor_control_host} is not a valid address, ${quad} is not and integer" | tee -a -- "${temp_dir}/fail.log" >/dev/null; return 1; }
-        { [ "${quad}" -ge 0 ] && [ "${quad}" -le 255 ]; } || { printf '%s\n' "${tor_control_host} is not a valid address, ${quad} is not within range: 0-255" | tee -a -- "${temp_dir}/fail.log" >/dev/null; return 1; }
+        printf '%d' "${quad}" >/dev/null 2>&1 || {
+          printf '%s\n' "${tor_control_host} is not a valid address, ${quad} is not and integer" | tee -a -- "${temp_dir}/fail.log" >/dev/null
+          return 1
+        }
+        { [ "${quad}" -ge 0 ] && [ "${quad}" -le 255 ]; } || {
+          printf '%s\n' "${tor_control_host} is not a valid address, ${quad} is not within range: 0-255" | tee -a -- "${temp_dir}/fail.log" >/dev/null
+          return 1
+        }
       done
     ;;
-    ":") return 1;; ## this happens when variables are empty
-    *) printf '%s\n' "socket '${socket}' is invalid" | tee -a -- "${temp_dir}/fail.log" >/dev/null; return 1;;
+    ":") ## this happens when variables are empty
+      return 1
+      ;;
+    *)
+      printf '%s\n' "socket '${socket}' is invalid" | tee -a -- "${temp_dir}/fail.log" >/dev/null
+      return 1
+      ;;
   esac
 
   ## assign the program options for socket and test if connection is refused
@@ -202,13 +264,22 @@ check_socket(){
       case "${socket_prog##*/}" in
         nc|netcat)
           socket_prog_connect="${socket_prog} -U ${tor_control_unix}"
-          ${socket_prog_connect} -zv || { printf '%s\n' "${socket_prog}: Connection refused to ${tor_control_unix}" | tee -a -- "${temp_dir}/fail.log" >/dev/null; return 1; }
+          ${socket_prog_connect} -zv || {
+            printf '%s\n' "${socket_prog}: Connection refused to ${tor_control_unix}" | tee -a -- "${temp_dir}/fail.log" >/dev/null
+            return 1
+          }
         ;;
         socat)
           socket_prog_connect="${socket_prog} - UNIX-CONNECT:${tor_control_unix}"
-          ${socket_prog} /dev/null "UNIX-CONNECT:${tor_control_unix}" || { printf '%s\n' "${socket_prog}: Connection refused to ${tor_control_unix}" | tee -a -- "${temp_dir}/fail.log" >/dev/null; return 1; }
+          ${socket_prog} /dev/null "UNIX-CONNECT:${tor_control_unix}" || {
+            printf '%s\n' "${socket_prog}: Connection refused to ${tor_control_unix}" | tee -a -- "${temp_dir}/fail.log" >/dev/null
+            return 1
+          }
         ;;
-        *) printf '%s\n' "${socket_prog##*/} doesn't support Unix-domain sockets" | tee -a -- "${temp_dir}/fail.log" >/dev/null; return 1;;
+        *)
+          printf '%s\n' "${socket_prog##*/} doesn't support Unix-domain sockets" | tee -a -- "${temp_dir}/fail.log" >/dev/null
+          return 1
+          ;;
       esac
 
       tor_socket="${tor_control_unix}"
@@ -217,18 +288,31 @@ check_socket(){
       case "${socket_prog##*/}" in
         nc|netcat)
           socket_prog_connect="${socket_prog} ${tor_control_host} ${tor_control_port}"
-          ${socket_prog_connect} -z || { printf '%s\n' "${socket_prog}: Connection refused to ${tor_control_host}:${tor_control_port}" | tee -a -- "${temp_dir}/fail.log" >/dev/null; return 1; }
+          ${socket_prog_connect} -z || {
+            printf '%s\n' "${socket_prog}: Connection refused to ${tor_control_host}:${tor_control_port}" | tee -a -- "${temp_dir}/fail.log" >/dev/null
+            return 1
+          }
         ;;
         socat)
           socket_prog_connect="${socket_prog} TCP:${tor_control_host}:${tor_control_port} -"
-          "${socket_prog}" "TCP:${tor_control_host}:${tor_control_port}" /dev/null || { printf '%s\n' "${socket_prog}: Connection refused to ${tor_control_host}:${tor_control_port}" | tee -a -- "${temp_dir}/fail.log" >/dev/null; return 1; }
+          "${socket_prog}" "TCP:${tor_control_host}:${tor_control_port}" /dev/null || {
+            printf '%s\n' "${socket_prog}: Connection refused to ${tor_control_host}:${tor_control_port}" | tee -a -- "${temp_dir}/fail.log" >/dev/null
+            return 1
+          }
         ;;
         telnet)
           socket_prog_connect="${socket_prog} ${tor_control_host} ${tor_control_port}"
-          printf "\x1dclose\x0d" | ${socket_prog_connect} 2>/dev/null | grep -q -- "Connected to ${tor_control_host}" || { printf '%s\n' "${socket_prog}: Connection refused to ${tor_control_host}:${tor_control_port}" | tee -a -- "${temp_dir}/fail.log" >/dev/null; return 1; }
+          telnet_close=$'\x1dclose\x0d'
+          printf '%s' "${telnet_close}" | ${socket_prog_connect} 2>/dev/null | grep -q -- "Connected to ${tor_control_host}" || {
+            printf '%s\n' "${socket_prog}: Connection refused to ${tor_control_host}:${tor_control_port}" | tee -a -- "${temp_dir}/fail.log" >/dev/null
+            return 1
+          }
         ;;
       esac
 
+      ## Read only indirectly, through the 'eval val=$"${key}"' loop in
+      ## get_dry_run, which shellcheck cannot follow.
+      # shellcheck disable=SC2034
       tor_socket="${tor_control_host}:${tor_control_port}"
     ;;
   esac
@@ -237,11 +321,15 @@ check_socket(){
 ## get string to authenticate to the controller
 login(){
   auth="$({ send_cmd "PROTOCOLINFO"; send_cmd "QUIT"; } | ${socket_prog_connect} 2>/dev/null | grep -- "AUTH")"
-  auth_methods="$(printf '%s\n' "${auth}" | sed "s/250-AUTH METHODS=//" | cut -d " " -f1 | tr "," "\n")"
+  ## The control protocol terminates lines with CRLF. Strip the CR before the
+  ## anchored method greps below: with HASHEDPASSWORD there is no trailing
+  ## COOKIEFILE= field to carry it away, so it would stay on the method name
+  ## itself and '^HASHEDPASSWORD$' would never match.
+  auth_methods="$(printf '%s\n' "${auth}" | sed "s/250-AUTH METHODS=//" | cut -d " " -f1 | tr -d "\\r" | tr "," "\n")"
   tor_cookie="$(printf '%s\n' "${auth}" | sed "s/.*COOKIEFILE=//" | tr -d "\"" | tr -d "\\r")"
 
   if test -r "${tor_cookie}"; then
-    if [ ! "$tor_cookie" = "/run/tor/control.authcookie" ]; then
+    if [ ! "${tor_cookie}" = "/run/tor/control.authcookie" ]; then
       error_msg "Cookie file location other than '/run/tor/control.authcookie' currently unsupported."
     fi
   fi
@@ -259,9 +347,15 @@ login(){
       done
       [ -z "${hex_prog}" ] && error_msg "Missing program to dump hex. Install either 'hexdump' or 'xxd' or 'od'."
       case "${hex_prog}" in
-        xxd) auth_string="AUTHENTICATE $(xxd -u -p -c 32 "${tor_cookie}")";;
-        hexdump) auth_string="AUTHENTICATE $(hexdump -e '32/1 "%02x""\n"' "${tor_cookie}")";;
-        od) auth_string="AUTHENTICATE $(od -t x1 "${tor_cookie}" | head -n 2 | cut -d " " -f2- | tr -d "\n" | tr -d " ")";;
+        xxd)
+          auth_string="AUTHENTICATE $(xxd -u -p -c 32 "${tor_cookie}")"
+          ;;
+        hexdump)
+          auth_string="AUTHENTICATE $(hexdump -e '32/1 "%02x""\n"' "${tor_cookie}")"
+          ;;
+        od)
+          auth_string="AUTHENTICATE $(od -t x1 "${tor_cookie}" | head -n 2 | cut -d " " -f2- | tr -d "\n" | tr -d " ")"
+          ;;
       esac
     fi
   elif
@@ -300,7 +394,7 @@ get_dry_run(){
 ## send command to the controller and sleep after it if required
 send_cmd(){
   ## avoid sending empty lines and cycle sleep for every line sent if cmd_cli has multiple lines
-  printf '%s\n' "${1}" | while IFS="$(printf '\n')" read -r line; do
+  printf '%s\n' "${1}" | while IFS=$'\n' read -r line; do
     [ -n "${line}" ] && { printf '%s\n' "${line}"; sleep "${sleep_n}"; }
   done
 }
@@ -326,7 +420,7 @@ finish(){
   [ -z "${quiet}" ] && printf '%s\n' "${str}"
   counter="$(printf '%s\n' "${str}" | grep -c -- "^250 ")"
   ## more than 3 '^250 ' reply status code occurs when $cmd_cli has multiple lines (\\n)
-  if [ "$counter" -ge "3" ]; then
+  if [ "${counter}" -ge "3" ]; then
     exit 0
   else
     exit 1
@@ -349,7 +443,9 @@ exit_handler() {
 get_arg(){
   ## if argument is empty or starts with '-', fail as it possibly is an option
   case "${arg}" in
-    ""|-*) error_msg "Option '${opt}' requires an argument.";;
+    ""|-*)
+      error_msg "Option '${opt}' requires an argument."
+      ;;
   esac
   value="${arg}"
   ## Escaping quotes is needed because else it will fail if the argument is quoted
@@ -360,27 +456,79 @@ get_arg(){
 
 ## hacky getopts
 while :; do
-  case "${1}" in
-    --?*) opt="${1#*--}"; arg="${2:-}";;
-    -?*) opt="${1#*-}"; arg="${2:-}";;
-    *) opt="${1:-}";;
+  ## '${1:-}': the loop runs until the arguments are exhausted, so the last
+  ## iteration reads an unset $1 by design -- the '*)' arm below is what ends it.
+  case "${1:-}" in
+    --?*)
+      opt="${1#*--}"
+      arg="${2:-}"
+      ;;
+    -?*)
+      opt="${1#*-}"
+      arg="${2:-}"
+      ;;
+    *)
+      opt="${1:-}"
+      ;;
   esac
   case "${opt}" in
-    c) get_arg cmd_cli; shift 2;;
-    s) get_arg tor_control_socket; shift 2;;
-    p) get_arg tor_password; shift 2;;
-    t) get_arg sleep_n; shift 2;;
-    q) quiet=1; shift 1;;
-    w) wait_confirmation=1; shift 1;;
-    d) debug_mode=1; shift 1;;
-    r) dry_run=1; shift 1;;
-    m) machine_mode=1; shift 1;;
-    tbb) torbrowser=1; shift 1;;
-    h) usage;;
-    V) printf '%s\n' "tor-ctrl ${torctrl_version}"; exit 0;;
-    -) shift 1; break;;
-    "") break;;
-    *) break;; ## it could be be usage instead of break, but then would need to use '--' to end option parsing
+    c)
+      get_arg cmd_cli
+      shift 2
+      ;;
+    s)
+      get_arg tor_control_socket
+      shift 2
+      ;;
+    p)
+      get_arg tor_password
+      shift 2
+      ;;
+    t)
+      get_arg sleep_n
+      shift 2
+      ;;
+    q)
+      quiet=1
+      shift 1
+      ;;
+    w)
+      wait_confirmation=1
+      shift 1
+      ;;
+    d)
+      debug_mode=1
+      shift 1
+      ;;
+    r)
+      dry_run=1
+      shift 1
+      ;;
+    m)
+      machine_mode=1
+      shift 1
+      ;;
+    tbb)
+      torbrowser=1
+      shift 1
+      ;;
+    h)
+      usage
+      ;;
+    V)
+      printf '%s\n' "tor-ctrl ${torctrl_version}"
+      exit 0
+      ;;
+    -)
+      shift 1
+      break
+      ;;
+    "")
+      break
+      ;;
+    *) ## it could be be usage instead of break, but then would need to use '--' to end option parsing
+      break
+      ;;
   esac
 done
 
