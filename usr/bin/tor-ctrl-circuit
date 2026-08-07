@@ -51,6 +51,18 @@ machine_mode=""
 # shellcheck disable=SC1091
 source /usr/libexec/helper-scripts/get_colors.sh
 
+## get_colors.sh decides by testing fd 2 (stderr) -- see its '! test -t 2'. This
+## script writes the palette to STDOUT, so a redirected report or a pipe into
+## another program would receive ANSI bytes whenever stderr merely happened to
+## be a terminal. Gate on the stream the colours actually land on.
+##
+## This does not reimplement the palette: it still comes from get_colors.sh.
+## It applies the same tty rule that file applies, to the correct descriptor.
+if [ ! -t 1 ]; then
+   yellow=""
+   nocolor=""
+fi
+
 
 usage(){
   printf '%s\n' "usage: ${me} [-s socket] [-p password]

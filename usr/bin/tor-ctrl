@@ -350,6 +350,13 @@ login(){
     fi
   fi
 
+  ## Assigned only inside the branches below, and read unconditionally after
+  ## them. When Tor offers no method this caller can use -- HASHEDPASSWORD with
+  ## no -p, or COOKIE with an unreadable cookie -- none of them fires, and the
+  ## '-z' test aborted instead of printing the "no supported auth method"
+  ## message that exists for exactly this case.
+  auth_string=""
+
   if printf '%s\n' "${auth_methods}" | grep -q -- "NULL"; then
     auth_string="AUTHENTICATE"
   elif test -r "${tor_cookie}"; then
