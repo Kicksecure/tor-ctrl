@@ -109,7 +109,11 @@ list_circuits(){
         relay_bandwidth="$((relay_bandwidth*512/1024/1024)) MiB/s"
         # shellcheck disable=SC2086
         relay_locale="$(tor-ctrl -c "GETINFO ip-to-country/${relay_host}" ${cli_args})"
-        relay_locale="$(printf '%s\n' "${relay_locale}" | grep -F -- "250-ip-to-country/${relay_host}=" | sed "s/.*=//;s/\\r//")"
+        ## '|| true': tor omits the country line for a relay whose IP it
+        ## cannot map, and grep then exits 1. Before strict mode that left
+        ## relay_locale empty and the row still printed; under errexit it
+        ## aborted the ENTIRE listing partway through.
+        relay_locale="$(printf '%s\n' "${relay_locale}" | grep -F -- "250-ip-to-country/${relay_host}=" | sed "s/.*=//;s/\\r//" || true)"
         ## Columns padded in shell rather than with a printf field width; see
         ## the note in pad.bsh. Widths match the previous
         ## '%1s. %-40s %-15s %-19s (%-2s) %9s' exactly.

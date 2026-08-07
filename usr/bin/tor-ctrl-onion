@@ -224,7 +224,13 @@ get_arg(){
   value="${arg}"
   # shellcheck disable=SC2140
   check_variable_name "${1}" || exit 1
-  eval "${1}"="\"${value}\""
+  ## SINGLE quotes: with double quotes the shell expands ${value} BEFORE eval
+  ## parses the result, so a value containing ';' or spaces is executed as
+  ## further commands -- 'tor-ctrl-onion -k "x; id"' ran 'id'. Single-quoting
+  ## makes eval expand it, and the printf %q escaping keeps a literal quote in
+  ## the value from closing the string.
+  printf -v value_quoted '%q' "${value}"
+  eval "${1}"="${value_quoted}"
 }
 
 ## hacky getopts
@@ -395,9 +401,14 @@ if [ -n "${add_onion}" ]; then
     ## each is either empty or a whole 'Name=value' word. Quoting them would
     ## pass an empty argument to ADD_ONION when the option was not given,
     ## which is a different command, so the splitting is deliberate.
+    ## 'exit_code' is captured explicitly, so errexit must NOT abort here:
+    ## under strict mode a failing tor-ctrl (bad password, 510 reply) or a grep
+    ## that matches nothing killed the script BEFORE the 'Failed to create
+    ## onion' message below could run.
+    exit_code=0
     # shellcheck disable=SC2086,SC2248
-    tor-ctrl ${cli_args} ADD_ONION "${key}" "${port}" ${client_pub_key} ${max_streams} ${flags} | grep -- "^250-" | tee -a -- "${permanent_onion_save%*/}/onion.tmp"
-    exit_code="${?}"
+    tor-ctrl ${cli_args} ADD_ONION "${key}" "${port}" ${client_pub_key} ${max_streams} ${flags} | grep -- "^250-" | tee -a -- "${permanent_onion_save%*/}/onion.tmp" \
+      || exit_code="${?}"
     [ "${exit_code}" -ne 0 ] && error_msg "Failed to create onion"
     onion_id_file="$(grep -- "250-ServiceID=" "${permanent_onion_save}/onion.tmp" | sed "s/250-ServiceID=//" | tr -d "\\r")"
     onion_id_file="$(validate_onion "${onion_id_file}")"

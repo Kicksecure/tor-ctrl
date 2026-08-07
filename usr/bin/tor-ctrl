@@ -303,7 +303,13 @@ check_socket(){
         telnet)
           socket_prog_connect="${socket_prog} ${tor_control_host} ${tor_control_port}"
           telnet_close=$'\x1dclose\x0d'
-          printf '%s' "${telnet_close}" | ${socket_prog_connect} 2>/dev/null | grep -q -- "Connected to ${tor_control_host}" || {
+          ## Read into a variable rather than piping into 'grep -q'. 'grep -q'
+          ## exits as soon as it matches and closes the pipe, so telnet takes
+          ## SIGPIPE and exits 141 -- and pipefail then reports the whole
+          ## pipeline as failed even though the connection SUCCEEDED, turning a
+          ## working telnet socket into "Connection refused".
+          telnet_output="$(printf '%s' "${telnet_close}" | ${socket_prog_connect} 2>/dev/null || true)"
+          printf '%s\n' "${telnet_output}" | grep -q -- "Connected to ${tor_control_host}" || {
             printf '%s\n' "${socket_prog}: Connection refused to ${tor_control_host}:${tor_control_port}" | tee -a -- "${temp_dir}/fail.log" >/dev/null
             return 1
           }
@@ -418,7 +424,10 @@ cmd_pipe(){
 finish(){
   str="$(cat)"
   [ -z "${quiet}" ] && printf '%s\n' "${str}"
-  counter="$(printf '%s\n' "${str}" | grep -c -- "^250 ")"
+  ## '|| true': 'grep -c' exits 1 when the count is ZERO, which under errexit
+  ## aborted before the comparison below could decide the exit status. The
+  ## outcome happened to match, but only by coincidence.
+  counter="$(printf '%s\n' "${str}" | grep -c -- "^250 " || true)"
   ## more than 3 '^250 ' reply status code occurs when $cmd_cli has multiple lines (\\n)
   if [ "${counter}" -ge "3" ]; then
     exit 0
@@ -451,7 +460,13 @@ get_arg(){
   ## Escaping quotes is needed because else it will fail if the argument is quoted
   # shellcheck disable=SC2140
   check_variable_name "${1}" || exit 1
-  eval "${1}"="\"${value}\""
+  ## SINGLE quotes: with double quotes the shell expands ${value} BEFORE eval
+  ## parses the result, so a value containing ';' or spaces is executed as
+  ## further commands -- 'tor-ctrl-onion -k "x; id"' ran 'id'. Single-quoting
+  ## makes eval expand it, and the printf %q escaping keeps a literal quote in
+  ## the value from closing the string.
+  printf -v value_quoted '%q' "${value}"
+  eval "${1}"="${value_quoted}"
 }
 
 ## hacky getopts

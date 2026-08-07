@@ -113,7 +113,10 @@ list_streams(){
   trap "exit_handler" EXIT
 
   listen_stream="$(cat -- "${temp_dir}/.stream.tmp")"
-  for stream_ordered in $(printf '%s\n' "${listen_stream}" | grep -- "^650 STREAM" | cut -d " " -f3 | sort -u | grep -v -- "^[[:space:]]*$" | grep -v -- "^250" ); do
+  ## '|| true': "no open streams" is the NORMAL state of a freshly started
+  ## monitor, and the grep then exits 1 -- which under errexit killed the
+  ## monitor instead of looping over an empty list.
+  for stream_ordered in $(printf '%s\n' "${listen_stream}" | grep -- "^650 STREAM" | cut -d " " -f3 | sort -u | grep -v -- "^[[:space:]]*$" | grep -v -- "^250" || true); do
     ## TODO: Should the second printf be '%s\n' instead of only '\n'?
     printf '%s\n' "${listen_stream}" | grep -- "^650 STREAM ${stream_ordered}" | while IFS=$'\n' read -r stream_line; do
       IFS=" " read -r _ _ stream_id stream_status circuit_id stream_target _ <<-EOF
@@ -169,7 +172,11 @@ EOF
               relay_bandwidth="$((relay_bandwidth*512/1024/1024)) MiB/s"
               # shellcheck disable=SC2086
               relay_locale="$(tor-ctrl -c "GETINFO ip-to-country/${relay_host}" ${cli_args})"
-              relay_locale="$(printf '%s\n' "${relay_locale}" | grep -F -- "250-ip-to-country/${relay_host}=" | sed "s/.*=//;s/\\r//")"
+              ## '|| true': tor omits the country line for a relay whose IP it
+              ## cannot map, and grep then exits 1. Before strict mode that left
+              ## relay_locale empty and the row still printed; under errexit it
+              ## aborted the ENTIRE listing partway through.
+              relay_locale="$(printf '%s\n' "${relay_locale}" | grep -F -- "250-ip-to-country/${relay_host}=" | sed "s/.*=//;s/\\r//") || true)"
               hop_column="$(pad_left "${hop}" 1)"
               fingerprint_column="$(pad_right "${relay_fingerprint}" 40)"
               host_column="$(pad_right "${relay_host}" 15)"
