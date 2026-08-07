@@ -194,7 +194,7 @@ EOF
               ## cannot map, and grep then exits 1. Before strict mode that left
               ## relay_locale empty and the row still printed; under errexit it
               ## aborted the ENTIRE listing partway through.
-              relay_locale="$(printf '%s\n' "${relay_locale}" | grep -F -- "250-ip-to-country/${relay_host}=" | sed "s/.*=//;s/\\r//") || true)"
+              relay_locale="$(printf '%s\n' "${relay_locale}" | grep -F -- "250-ip-to-country/${relay_host}=" | sed "s/.*=//;s/\\r//" || true)"
               hop_column="$(pad_left "${hop}" 1)"
               fingerprint_column="$(pad_right "${relay_fingerprint}" 40)"
               host_column="$(pad_right "${relay_host}" 15)"
