@@ -196,13 +196,23 @@ get_socket(){
   ## Jan 1 00:00:00.000 [notice] Including configuration file
   ## "/usr/local/etc/torrc.d//50_user.conf".
   # shellcheck disable=SC2086
-  tor_config_files="$(${tor_start_command:-tor} --verify-config | grep -E -- " Read configuration file [^ ]*| Including configuration file [^ ]*" | awk '{print $NF}' | sed "s/\"//;s/\".//;s/\/\//\//")"
+  ## '|| true' because a no-match is EXPECTED, not an error, and the guard for
+  ## it is the '[ -n ]' test below. Under pipefail this pipeline fails when the
+  ## grep matches nothing, and also when '--verify-config' itself fails -- which
+  ## the comment above says to ignore, since it fails whenever tor-ctrl is not
+  ## run as root or the tor user. Aborting here would skip the documented
+  ## fallback to 127.0.0.1:9051.
+  tor_config_files="$(${tor_start_command:-tor} --verify-config | grep -E -- " Read configuration file [^ ]*| Including configuration file [^ ]*" | awk '{print $NF}' | sed "s/\"//;s/\".//;s/\/\//\//")" || true
 
   ## grepping no file will be stuck forever
   if [ -n "${tor_config_files}" ]; then
     ## only one option is needed, use head
     # shellcheck disable=SC2086
-    tor_control_socket_filesystem="$(grep -E -- "^ControlPort [^ ]*|^ControlSocket [^ ]*" ${tor_config_files} | cut -d ":" -f2- | cut -d " " -f2 | sed "s/\"//g;s/unix\://" | head -n 1)"
+    ## '|| true' for the same reason: a torrc with NEITHER ControlPort nor
+    ## ControlSocket is the DEFAULT Debian configuration, so this grep matching
+    ## nothing is the common case. 'head -n 1' also closes the pipe early, which
+    ## pipefail reports as failure on its own.
+    tor_control_socket_filesystem="$(grep -E -- "^ControlPort [^ ]*|^ControlSocket [^ ]*" ${tor_config_files} | cut -d ":" -f2- | cut -d " " -f2 | sed "s/\"//g;s/unix\://" | head -n 1)" || true
   fi
 }
 
