@@ -1,6 +1,34 @@
 #!/bin/bash
 
+## Copyright (C) 2021 - 2022 nyxnor <nyxnor@protonmail.com>
+## Copyright (C) 2013 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@riseup.net>
+## See the file COPYING for copying conditions.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/strings.bsh
+## Sibling repo: absent in an isolated CI checkout, so shellcheck cannot
+## follow it there. The source= path above still documents where it lives.
+# shellcheck disable=SC1091
 source /usr/libexec/helper-scripts/strings.bsh
+
+## sets: has
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/has.sh
+# shellcheck disable=SC1091
+source /usr/libexec/helper-scripts/has.sh
+
+## sets: pad_right, pad_left
+# shellcheck source=../libexec/tor-ctrl/pad.bsh
+## Resolved relative to this script, which shellcheck does not do from
+## the repository root the gate runs in. R-080 requires the relative
+## spelling, so the path documents the location and SC1091 is disabled.
+# shellcheck disable=SC1091
+source /usr/libexec/tor-ctrl/pad.bsh
 
 #nocolor="\033[0m"
 #bold="\033[1m"
@@ -9,6 +37,28 @@ nocolor=""
 bold=""
 
 me="${0##*/}"
+
+## Assigned only when the matching option is given, and read below through
+## '[ -n ]' / '[ -z ]' tests, so empty is what these expanded to before strict
+## mode. The stream-parsing state carried across loop iterations is initialised
+## for the same reason.
+tor_control_socket=""
+tor_password=""
+machine_mode=""
+no_circuit=""
+client_filter=""
+temp_dir=""
+stream_target_orig=""
+stream_target_clean=""
+stream_purpose=""
+stream_client=""
+
+## tor-ctrl-circuit defines this and tor-ctrl-stream did not, so the
+## "Install tor-ctrl" path below called a command that does not exist.
+error_msg(){
+  printf '%s\n' "${me}: [error] ${1}" >&2
+  exit 1
+}
 
 usage(){
   printf '%s\n' "usage: ${me} [-mzh] [-s socket] [-p password]
@@ -57,7 +107,7 @@ list_streams(){
   listen_stream="$(cat -- "${temp_dir}/.stream.tmp")"
   for stream_ordered in $(printf '%s\n' "${listen_stream}" | grep -- "^650 STREAM" | cut -d " " -f3 | sort -u | grep -v -- "^[[:space:]]*$" | grep -v -- "^250" ); do
     ## TODO: Should the second printf be '%s\n' instead of only '\n'?
-    printf '%s\n' "${listen_stream}" | grep -- "^650 STREAM ${stream_ordered}" | while IFS="$(printf '\n')" read -r stream_line; do
+    printf '%s\n' "${listen_stream}" | grep -- "^650 STREAM ${stream_ordered}" | while IFS=$'\n' read -r stream_line; do
       IFS=" " read -r _ _ stream_id stream_status circuit_id stream_target _ <<-EOF
         $(printf '%s' "${stream_line}")
 EOF
@@ -89,12 +139,15 @@ EOF
             printf "%s\n" "${bold}Stream:${nocolor} ${stream_id}, ${bold}Purpose:${nocolor} ${stream_purpose}, ${bold}Client:${nocolor} ${stream_client}${nocolor}"
             printf "%s\n" "${bold}Circuit:${nocolor} ${circuit_id}, ${bold}Purpose:${nocolor} ${circuit_purpose}${nocolor}"
             printf "%s\n" "${bold}"
-            printf '%1s. %-40s %-15s %-19s %-4s %9s\n' "n" "Fingerprint" "Address" "Nickname" "Geo" "Bandwidth"
+            ## Columns padded in shell rather than with a printf field width;
+            ## see the note in pad.bsh. Widths match the previous
+            ## '%1s. %-40s %-15s %-19s %-4s %9s' exactly.
+            printf '%s\n' "$(pad_left "n" 1). $(pad_right "Fingerprint" 40) $(pad_right "Address" 15) $(pad_right "Nickname" 19) $(pad_right "Geo" 4) $(pad_left "Bandwidth" 9)"
             printf "%s\n" "${bold}------------------------------------------------------------------------------------------------------${nocolor}"
             hop=0
             for relay in $(printf '%s\n' "${circuit_path}" | tr "," " "); do
               hop=$((hop+1))
-              [ ${hop} -gt 3 ] && break
+              [ "${hop}" -gt 3 ] && break
               relay="$(printf '%s\n' "${relay}" | tr -d "$" | tr "~" " ")"
               relay_fingerprint="$(printf '%s\n' "${relay}" | cut -d " " -f1)"
               relay_nickname="$(printf '%s\n' "${relay}" | cut -d " " -f2)"
@@ -109,16 +162,22 @@ EOF
               # shellcheck disable=SC2086
               relay_locale="$(tor-ctrl -c "GETINFO ip-to-country/${relay_host}" ${cli_args})"
               relay_locale="$(printf '%s\n' "${relay_locale}" | grep -F -- "250-ip-to-country/${relay_host}=" | sed "s/.*=//;s/\\r//")"
-              printf '%1s. %-40s %-15s %-19s %-4s %9s\n' "${hop}" "${relay_fingerprint}" "${relay_host}" "${relay_nickname}" "(${relay_locale})" "${relay_bandwidth}"
+              hop_column="$(pad_left "${hop}" 1)"
+              fingerprint_column="$(pad_right "${relay_fingerprint}" 40)"
+              host_column="$(pad_right "${relay_host}" 15)"
+              nickname_column="$(pad_right "${relay_nickname}" 19)"
+              locale_column="$(pad_right "(${relay_locale})" 4)"
+              bandwidth_column="$(pad_left "${relay_bandwidth}" 9)"
+              printf '%s\n' "${hop_column}. ${fingerprint_column} ${host_column} ${nickname_column} ${locale_column} ${bandwidth_column}"
             done
             printf "%s\n" "${bold}------------------------------------------------------------------------------------------------------${nocolor}"
           else
             ! test -f "${temp_dir}/.stream.loop" && {
               touch -- "${temp_dir}/.stream.loop"
               printf "%s\n" ""
-              printf "ID Purpose Client CircID CircPurpose Target"
+              printf '%s' "ID Purpose Client CircID CircPurpose Target"
               #printf '\n%6s %-20s %-21s %6s %-20s %-62s\n' "ID" "Purpose" "Client" "CircID" "CircPurpose" "Target"
-              printf "%s" "------------------------------------------------------------------------------------------------------"
+              printf '%s' "------------------------------------------------------------------------------------------------------"
             }
             ## Stream purpose is unknown for tor-ctrl if it was an end of stream that we didn't catch the creation
             ## unknown us being specified for proper field separation
@@ -135,16 +194,28 @@ EOF
 
 #set -x
 
-command -v tor-ctrl >/dev/null || error_msg "Install tor-ctrl"
+has tor-ctrl || error_msg "Install tor-ctrl"
 
 while getopts ":s:p:a:mzh" Option; do
   case ${Option} in
-    s) tor_control_socket="${OPTARG}";;
-    p) tor_password="${OPTARG}";;
-    m) machine_mode=1;;
-    z) no_circuit=1;;
-    a) client_filter="${OPTARG}";;
-    h|*) usage;;
+    s)
+      tor_control_socket="${OPTARG}"
+      ;;
+    p)
+      tor_password="${OPTARG}"
+      ;;
+    m)
+      machine_mode=1
+      ;;
+    z)
+      no_circuit=1
+      ;;
+    a)
+      client_filter="${OPTARG}"
+      ;;
+    h|*)
+      usage
+      ;;
   esac
 done
 

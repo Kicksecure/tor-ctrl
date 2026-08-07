@@ -1,0 +1,42 @@
+#!/bin/bash
+
+## Copyright (C) 2021 - 2022 nyxnor <nyxnor@protonmail.com>
+## Copyright (C) 2013 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@riseup.net>
+## See the file COPYING for copying conditions.
+
+## Column padding for the relay tables printed by tor-ctrl-circuit and
+## tor-ctrl-stream.
+##
+## Padding happens here rather than through a printf field width ('%-40s')
+## because R-030 requires the format string itself to be fixed, and a width
+## specifier is not that. Same approach the gated-tool coverage report uses.
+##
+## Both functions reproduce printf's semantics exactly, including the part that
+## is easy to get wrong: a value LONGER than the field is printed in full, never
+## truncated. Widening a column is a cosmetic change; silently cutting a relay
+## fingerprint in half is not.
+##
+## style-ok: no-strict -- this file is SOURCED, so a strict-mode block here
+## would change the CALLING script's shell options rather than its own.
+
+## Left-justify: pad on the RIGHT, like '%-<width>s'.
+pad_right() {
+   local text width
+   text="$1"
+   width="$2"
+   while [ "${#text}" -lt "${width}" ]; do
+      text="${text} "
+   done
+   printf '%s' "${text}"
+}
+
+## Right-justify: pad on the LEFT, like '%<width>s'.
+pad_left() {
+   local text width
+   text="$1"
+   width="$2"
+   while [ "${#text}" -lt "${width}" ]; do
+      text=" ${text}"
+   done
+   printf '%s' "${text}"
+}
