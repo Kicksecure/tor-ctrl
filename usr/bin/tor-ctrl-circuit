@@ -4,6 +4,10 @@
 ## Copyright (C) 2013 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@riseup.net>
 ## See the file COPYING for copying conditions.
 
+## The colour palette comes from the sourced get_colors.sh, which shellcheck
+## cannot follow in an isolated checkout.
+# shellcheck disable=SC2154
+
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -38,8 +42,15 @@ tor_control_socket=""
 tor_password=""
 machine_mode=""
 
-nocolor="\033[0m"
-yellow="\033[33m"
+## sets: nocolor, bold, yellow and the rest of the palette, already emptied
+## when the terminal cannot render them -- no TERM, TERM=dumb, NO_COLOR, or
+## stderr not a terminal. Replaces two inline ANSI definitions.
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/get_colors.sh
+## Sibling repo: absent in an isolated CI checkout, so shellcheck cannot follow
+## it there. The source= path above still documents where it lives.
+# shellcheck disable=SC1091
+source /usr/libexec/helper-scripts/get_colors.sh
+
 
 usage(){
   printf '%s\n' "usage: ${me} [-s socket] [-p password]
@@ -69,7 +80,10 @@ error_msg(){
 list_circuits(){
   # shellcheck disable=SC2086
   circuit_all="$(tor-ctrl -c "GETINFO circuit-status" ${cli_args})"
-  printf '%b\n' "${yellow}${me}: [warn] Do not share this information publicly, it could deanonymize yourself.${nocolor}"
+  ## '%s', not '%b': get_colors.sh stores real escape BYTES, so there is
+  ## nothing left for %b to decode -- and %b would additionally interpret any
+  ## backslash that appeared in the message text.
+  printf '%s\n' "${yellow}${me}: [warn] Do not share this information publicly, it could deanonymize yourself.${nocolor}"
   circuit_all="$(printf '%s\n' "${circuit_all}" | sed "/250 OK/d;/250+circuit-status=/d;/250 closing connection/d")"
   printf '%s\n' "${circuit_all}" | while IFS=$'\n' read -r circuit || [ -n "${circuit}" ]; do
     circuit_id="$(printf '%s\n' "${circuit}" | cut -d " " -f1)"
@@ -110,7 +124,10 @@ list_circuits(){
       printf '%s\n' ""
     fi
   done
-  printf '%b\n' "${yellow}${me}: [warn] Do not share this information publicly, it could deanonymize yourself.${nocolor}"
+  ## '%s', not '%b': get_colors.sh stores real escape BYTES, so there is
+  ## nothing left for %b to decode -- and %b would additionally interpret any
+  ## backslash that appeared in the message text.
+  printf '%s\n' "${yellow}${me}: [warn] Do not share this information publicly, it could deanonymize yourself.${nocolor}"
 }
 
 has tor-ctrl || error_msg "Install tor-ctrl"

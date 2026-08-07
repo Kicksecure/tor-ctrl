@@ -4,6 +4,10 @@
 ## Copyright (C) 2013 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@riseup.net>
 ## See the file COPYING for copying conditions.
 
+## The colour palette comes from the sourced get_colors.sh, which shellcheck
+## cannot follow in an isolated checkout.
+# shellcheck disable=SC2154
+
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -30,11 +34,15 @@ source /usr/libexec/helper-scripts/has.sh
 # shellcheck disable=SC1091
 source /usr/libexec/tor-ctrl/pad.bsh
 
-#nocolor="\033[0m"
-#bold="\033[1m"
-## TODO: colors versus stecho
-nocolor=""
-bold=""
+## sets: nocolor, bold, yellow and the rest of the palette, already emptied
+## when the terminal cannot render them -- no TERM, TERM=dumb, NO_COLOR, or
+## stderr not a terminal. Replaces two inline ANSI definitions.
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/get_colors.sh
+## Sibling repo: absent in an isolated CI checkout, so shellcheck cannot follow
+## it there. The source= path above still documents where it lives.
+# shellcheck disable=SC1091
+source /usr/libexec/helper-scripts/get_colors.sh
+
 
 me="${0##*/}"
 
