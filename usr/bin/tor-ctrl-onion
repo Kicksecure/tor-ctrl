@@ -459,20 +459,19 @@ fi
 if [ -n "${onion_client_auth_add}" ]; then
   [ -z "${onion}" ] && error_msg "This option requires an onion service to be specified, use with '-o address.onion'"
   onion="$(validate_onion "${onion}")"
-  ## permanent_auth is empty unless '-n' was given, and must expand to NOTHING
-  ## then -- a quoted empty argument would be sent as an empty Flags field and
-  ## rejected. Same deliberate unquoted expansion as ADD_ONION's optional args.
-  # shellcheck disable=SC2086
   ## '${permanent_auth}' and '${cli_args}' are DELIBERATELY UNQUOTED: each is
   ## either empty or a flag, and quoting an empty one passes a stray empty
-  ## ARGUMENT to tor-ctrl rather than nothing at all. Same shape as the
+  ## ARGUMENT to tor-ctrl rather than nothing at all -- for permanent_auth that
+  ## means an empty 'Flags=' field, which tor rejects. Same shape as the
   ## bwrap_args regression earlier in this pass, where a blanket quoting sweep
   ## broke every sandboxed launch.
   ##
-  ## Separately reported and NOT fixed here: with '-n', permanent_auth is set
-  ## but the ONION_CLIENT_AUTH_ADD call does not actually persist the auth --
-  ## the flag is a no-op. That is a behavioural bug for the maintainer, not a
-  ## quoting one.
+  ## permanent_auth carries the literal 'Flags=Permanent' rather than a boolean,
+  ## so '-n' persists the credential to the ClientOnionAuthDir. Covered by
+  ## dist-ai's tor-ctrl-tests, which asserts both directions against a tor it
+  ## starts itself: ephemeral leaves that directory empty, permanent writes
+  ## '<onion>.auth_private'. tor answers 250 OK either way, so the exit status
+  ## alone cannot tell them apart.
   # shellcheck disable=SC2248,SC2086
   tor-ctrl ${cli_args} ONION_CLIENT_AUTH_ADD "${onion}" "${onion_client_auth_add}" ${permanent_auth}
   exit "${?}"
