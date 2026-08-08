@@ -54,7 +54,6 @@ onion_client_auth_add=""
 onion_client_auth_remove=""
 onion_client_auth_view=""
 onion_id_file_realpath=""
-permanent_auth=""
 permanent_onion_restore=""
 permanent_onion_save=""
 permanent_onion_save_realpath=""
@@ -149,6 +148,9 @@ CLIENT
 
   -n             permanent flag: this client's credentials should be stored in
                  the filesystem.
+                 notice: NOT IMPLEMENTED -- passing it is an error rather than a
+                         silent downgrade. 'Flags=Permanent' is never sent, so
+                         credentials would be ephemeral regardless.
                  notice: If this is not set, the client's credentials are
                          ephemeral and stored in memory.
 
@@ -310,15 +312,17 @@ while :; do
       shift 2
       ;;
     n)
-      ## BUG, not dead code: '-n' is documented as the permanent flag, but
-      ## nothing ever reads permanent_auth, so ONION_CLIENT_AUTH_ADD is sent
-      ## without 'Flags=Permanent' and the credentials stay ephemeral. Left
-      ## as-is deliberately -- implementing it writes client credentials to
-      ## disk, which needs verification against a real onion service rather
-      ## than a strict-mode pass.
-      # shellcheck disable=SC2034
-      permanent_auth=1
-      shift 1
+      ## '-n' is documented as the permanent flag, but nothing appends
+      ## 'Flags=Permanent' to ONION_CLIENT_AUTH_ADD, so the credentials stay
+      ## ephemeral. Implementing it writes client credentials to disk and needs
+      ## verification against a real onion service, which a strict-mode pass
+      ## cannot provide -- so it stays unimplemented.
+      ##
+      ## Refusing is the honest form of unimplemented. Accepting '-n' silently
+      ## gave the caller ephemeral credentials while the usage text promised
+      ## filesystem storage, which is worse than not offering it: the caller
+      ## believes their authorization survives a tor restart when it does not.
+      error_msg "'-n' (permanent client authorization) is not implemented: tor-ctrl-onion does not send 'Flags=Permanent', so credentials would be ephemeral despite the flag. Omit '-n' to request ephemeral authorization explicitly."
       ;;
     R)
       onion_client_auth_remove=1

@@ -113,8 +113,8 @@ list_circuits(){
         relay_nickname="$(printf '%s\n' "${relay}" | cut -d " " -f2)"
         # shellcheck disable=SC2086
         relay_status="$(tor-ctrl -c "GETINFO ns/id/${relay_fingerprint}" ${cli_args})"
-        relay_host="$(printf '%s\n' "${relay_status}" | grep -- "^r " | cut -d " " -f7)"
-        relay_bandwidth="$(printf '%s\n' "${relay_status}" | grep -- "^w " | sed "s/w Bandwidth=//;s/\\r//")"
+        relay_host="$(printf '%s\n' "${relay_status}" | grep -- "^r " | cut -d " " -f7 || true)"
+        relay_bandwidth="$(printf '%s\n' "${relay_status}" | grep -- "^w " | sed "s/w Bandwidth=//;s/\\r//" || true)"
         if ! is_whole_number "${relay_bandwidth}"; then
           relay_bandwidth=0
         fi
@@ -175,8 +175,23 @@ cli_args=""
 
 ## only to get which socket it successfully connects
 ## cli_args is a pre-split option string, so the expansion must NOT be quoted.
-## The grep finds nothing when the notice is suppressed, which is not an error.
+##
+## The grep finds nothing when the notice is suppressed, which is not an error --
+## but a bare '|| true' also swallows a FAILING tor-ctrl query, which is the one
+## thing this probe exists to report on. Capture PIPESTATUS instead and tolerate
+## only the documented case: tor-ctrl succeeded and grep matched nothing.
+probe_status=()
 # shellcheck disable=SC2086
-tor-ctrl -c "GETINFO circuit-status" ${cli_args} | grep -- "connecting to socket with command" || true
+tor-ctrl -c "GETINFO circuit-status" ${cli_args} | grep -- "connecting to socket with command" || probe_status=("${PIPESTATUS[@]}")
+
+if [ "${#probe_status[@]}" -gt 0 ]; then
+  if [ "${probe_status[0]}" != "0" ]; then
+    error_msg "tor-ctrl could not query the controller (exit ${probe_status[0]})."
+  fi
+  ## 1 is grep's "no match"; anything else is a real grep failure.
+  if [ "${probe_status[1]}" != "1" ]; then
+    error_msg "reading the socket notice failed (grep exit ${probe_status[1]})."
+  fi
+fi
 
 list_circuits

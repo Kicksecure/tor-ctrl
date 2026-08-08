@@ -96,6 +96,13 @@ If you have tor running with `SandBox 1`, you will need to restart tor.
 
 ### Requirements
 
+* **bash** 4.4 or newer. The scripts run under `shopt -s inherit_errexit`, which
+  does not exist before 4.4; on an older bash it is a fatal `shopt` error at
+  startup. Every currently supported Debian release ships bash 5.x, so this is
+  not expressed as a package dependency -- bash is Essential, and a versioned
+  dependency could never fail there. It matters when running the scripts
+  standalone on another unix, per "How to install on any unix system" below.
+
 At least one of each item is necessary:
 
 * Networking tool: **nc**/**socat**/**telnet**

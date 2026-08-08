@@ -137,14 +137,14 @@ EOF
       case "${stream_status}" in
         NEW|NEWRESOLVE)
           stream_target_orig="${stream_target}"
-          stream_purpose="$(printf '%s\n' "${stream_line}" | tr " " "\n" | grep -- "PURPOSE=" | sed "s/PURPOSE=//")"
-          stream_client="$(printf '%s\n' "${stream_line}" | tr " " "\n" | grep -- "SOURCE_ADDR=" | sed "s/SOURCE_ADDR=//")"
+          stream_purpose="$(printf '%s\n' "${stream_line}" | tr " " "\n" | grep -- "PURPOSE=" | sed "s/PURPOSE=//" || true)"
+          stream_client="$(printf '%s\n' "${stream_line}" | tr " " "\n" | grep -- "SOURCE_ADDR=" | sed "s/SOURCE_ADDR=//" || true)"
 	  test -n "${client_filter}" && [ "${client_filter%:*}" != "${stream_client%:*}" ] && break
         ;;
         REMAP)
           stream_target_cache="$(printf '%s\n' "$(cat -- "${temp_dir}/.stream.hosts" 2>/dev/null) ${stream_target_orig%:*}=${stream_target%:*}")"
           printf '%s\n' "${stream_target_cache}" | tee -- "${temp_dir}/.stream.hosts" >/dev/null
-          stream_target_hostname="$(printf '%s\n' "${stream_target_cache}" | tr " " "\n" | grep -F -- "=${stream_target%:*}" | head -n 1 | sed "s|=.*||")"
+          stream_target_hostname="$(printf '%s\n' "${stream_target_cache}" | tr " " "\n" | grep -F -- "=${stream_target%:*}" | head -n 1 | sed "s|=.*||" || true)"
           stream_target_clean="$(printf '%s\n' "${stream_target_hostname}~(${stream_target})")"
         ;;
         CLOSED|SUCCEEDED)
@@ -182,8 +182,8 @@ EOF
               relay_nickname="$(printf '%s\n' "${relay}" | cut -d " " -f2)"
               # shellcheck disable=SC2086
               relay_status="$(tor-ctrl -c "GETINFO ns/id/${relay_fingerprint}" ${cli_args})"
-              relay_host="$(printf '%s\n' "${relay_status}" | grep -- "^r " | cut -d " " -f7)"
-              relay_bandwidth="$(printf '%s\n' "${relay_status}" | grep -- "^w " | sed "s/w Bandwidth=//;s/\\r//")"
+              relay_host="$(printf '%s\n' "${relay_status}" | grep -- "^r " | cut -d " " -f7 || true)"
+              relay_bandwidth="$(printf '%s\n' "${relay_status}" | grep -- "^w " | sed "s/w Bandwidth=//;s/\\r//" || true)"
               if ! is_whole_number "${relay_bandwidth}"; then
                 relay_bandwidth=0
               fi

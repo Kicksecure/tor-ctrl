@@ -14,6 +14,10 @@
 ## to configure the control method (ControlPort/ControlSocket) and the
 ## authentication method (CookieAuthentication/HashedControlPassword).
 
+## Needs bash 4.4 or newer: 'inherit_errexit' does not exist before it, and an
+## older bash dies here with a fatal shopt error. Not a package dependency --
+## bash is Essential in Debian and every supported release ships 5.x -- but it
+## constrains standalone use on other unix systems. See README.md Requirements.
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -336,7 +340,13 @@ check_socket(){
 
 ## get string to authenticate to the controller
 login(){
-  auth="$({ send_cmd "PROTOCOLINFO"; send_cmd "QUIT"; } | ${socket_prog_connect} 2>/dev/null | grep -- "AUTH")"
+  ## '|| true' INSIDE the substitution: no AUTH line is a state this function is
+  ## built to report, not an error. Without it the failing grep aborts under
+  ## errexit and the "Authentication method not detected" block below -- which
+  ## exists for exactly this case -- is never reached. It must sit before the
+  ## closing ')', or it becomes literal text in the value instead of guarding the
+  ## pipeline.
+  auth="$({ send_cmd "PROTOCOLINFO"; send_cmd "QUIT"; } | ${socket_prog_connect} 2>/dev/null | grep -- "AUTH" || true)"
   ## The control protocol terminates lines with CRLF. Strip the CR before the
   ## anchored method greps below: with HASHEDPASSWORD there is no trailing
   ## COOKIEFILE= field to carry it away, so it would stay on the method name
@@ -360,8 +370,12 @@ login(){
   if printf '%s\n' "${auth_methods}" | grep -q -- "NULL"; then
     auth_string="AUTHENTICATE"
   elif test -r "${tor_cookie}"; then
-    safecookie_enabled="$(printf '%s\n' "${auth_methods}" | grep -- "^SAFECOOKIE$")"
-    cookie_enabled="$(printf '%s\n' "${auth_methods}" | grep -- "^COOKIE$")"
+    ## '|| true' for the same reason as the AUTH grep above: an absent method is
+    ## the normal case these two variables exist to express, and the '-n' tests
+    ## below are written for it. Unguarded, tor offering only one of the two
+    ## aborts here instead.
+    safecookie_enabled="$(printf '%s\n' "${auth_methods}" | grep -- "^SAFECOOKIE$" || true)"
+    cookie_enabled="$(printf '%s\n' "${auth_methods}" | grep -- "^COOKIE$" || true)"
     if [ -n "${cookie_enabled}" ]; then
       ## xxd is only needed when authenticating with SAFECOOKIE
       prog_converter_hex="xxd hexdump od"
