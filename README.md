@@ -103,6 +103,12 @@ If you have tor running with `SandBox 1`, you will need to restart tor.
   dependency could never fail there. It matters when running the scripts
   standalone on another unix, per "How to install on any unix system" below.
 
+* **helper-scripts**, providing `/usr/libexec/helper-scripts/strings.bsh`,
+  `has.sh` and `get_colors.sh`. The scripts source these at startup under
+  `set -o errexit`, so a missing one is a fatal error before any argument is
+  parsed, not a degraded mode. The Debian package depends on it; a standalone
+  install has to provide it.
+
 At least one of each item is necessary:
 
 * Networking tool: **nc**/**socat**/**telnet**
@@ -111,9 +117,15 @@ At least one of each item is necessary:
 
 ### How to install on any unix system
 
-Install the script and the manual:
+`usr/bin` alone is not enough: `tor-ctrl-circuit` and `tor-ctrl-stream` source
+`/usr/libexec/tor-ctrl/pad.bsh`, so omitting it makes both fail the moment they
+start.
+
+Install the scripts, the shared library and the manual:
 ```sh
 sudo cp usr/bin/* /usr/bin/
+sudo mkdir -p /usr/libexec/tor-ctrl
+sudo cp usr/libexec/tor-ctrl/* /usr/libexec/tor-ctrl/
 sudo cp auto-generated-man-pages/tor-ctrl.8 /usr/share/man/man8/
 ```
 
