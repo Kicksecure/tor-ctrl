@@ -26,10 +26,7 @@ shopt -s inherit_errexit
 shopt -s shift_verbose
 
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/strings.bsh
-## Sibling repo: absent in an isolated CI checkout, so shellcheck cannot
-## follow it there. The source= path above still documents where it lives.
-# shellcheck disable=SC1091
-source /usr/libexec/helper-scripts/strings.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh
 
 ## script version
 torctrl_version="5.0.0"
@@ -323,7 +320,7 @@ check_socket(){
           ## pipeline as failed even though the connection SUCCEEDED, turning a
           ## working telnet socket into "Connection refused".
           telnet_output="$(printf '%s' "${telnet_close}" | ${socket_prog_connect} 2>/dev/null || true)"
-          printf '%s\n' "${telnet_output}" | grep -q -- "Connected to ${tor_control_host}" || {
+          grep --quiet -- "Connected to ${tor_control_host}" <<< "${telnet_output}" || {
             printf '%s\n' "${socket_prog}: Connection refused to ${tor_control_host}:${tor_control_port}" | tee -a -- "${temp_dir}/fail.log" >/dev/null
             return 1
           }
@@ -367,7 +364,7 @@ login(){
   ## message that exists for exactly this case.
   auth_string=""
 
-  if printf '%s\n' "${auth_methods}" | grep -q -- "NULL"; then
+  if grep --quiet -- "NULL" <<< "${auth_methods}"; then
     auth_string="AUTHENTICATE"
   elif test -r "${tor_cookie}"; then
     ## '|| true' for the same reason as the AUTH grep above: an absent method is
@@ -397,18 +394,18 @@ login(){
     fi
   elif
     # shellcheck disable=SC2154
-    [ -n "${tor_password}" ] && printf '%s\n' "${auth_methods}" | grep -q -- "^HASHEDPASSWORD$" ; then
+    [ -n "${tor_password}" ] && grep --quiet -- "^HASHEDPASSWORD$" <<< "${auth_methods}" ; then
     auth_string="AUTHENTICATE \"${tor_password}\""
   fi
 
   if [ -z "${auth_string}" ]; then
     auth_failed=""
     printf '%s\n' "${me}: Authentication method not detected."
-    if printf '%s\n' "${auth_methods}" | grep -q -- "^COOKIE$" && ! test -r "${tor_cookie}"; then
+    if grep --quiet -- "^COOKIE$" <<< "${auth_methods}" && ! test -r "${tor_cookie}"; then
       printf '%s\n' "${me}: COOKIE is enabled but not readable by user ${USER}."
       auth_failed=1
     fi
-    if printf '%s\n' "${auth_methods}" | grep -q -- "^HASHEDPASSWORD$" && [ -z "${tor_password}" ]; then
+    if grep --quiet -- "^HASHEDPASSWORD$" <<< "${auth_methods}" && [ -z "${tor_password}" ]; then
       printf '%s\n' "${me}: HASHEDPASSWORD is enabled but no password provided on the command line."
       auth_failed=1
     fi

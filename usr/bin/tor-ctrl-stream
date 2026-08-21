@@ -16,32 +16,21 @@ shopt -s inherit_errexit
 shopt -s shift_verbose
 
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/strings.bsh
-## Sibling repo: absent in an isolated CI checkout, so shellcheck cannot
-## follow it there. The source= path above still documents where it lives.
-# shellcheck disable=SC1091
-source /usr/libexec/helper-scripts/strings.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh
 
 ## sets: has
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/has.sh
-# shellcheck disable=SC1091
-source /usr/libexec/helper-scripts/has.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 
 ## sets: pad_right, pad_left
 # shellcheck source=../libexec/tor-ctrl/pad.bsh
-## Resolved relative to this script, which shellcheck does not do from
-## the repository root the gate runs in. R-080 requires the relative
-## spelling, so the path documents the location and SC1091 is disabled.
-# shellcheck disable=SC1091
 source /usr/libexec/tor-ctrl/pad.bsh
 
 ## sets: nocolor, bold, yellow and the rest of the palette, already emptied
 ## when the terminal cannot render them -- no TERM, TERM=dumb, NO_COLOR, or
 ## stderr not a terminal. Replaces two inline ANSI definitions.
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/get_colors.sh
-## Sibling repo: absent in an isolated CI checkout, so shellcheck cannot follow
-## it there. The source= path above still documents where it lives.
-# shellcheck disable=SC1091
-source /usr/libexec/helper-scripts/get_colors.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/get_colors.sh
 
 ## get_colors.sh decides by testing fd 2 (stderr) -- see its '! test -t 2'. This
 ## script writes the palette to STDOUT, so a redirected report or a pipe into
