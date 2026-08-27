@@ -10,6 +10,10 @@ https://gitweb.torproject.org/torspec.git/tree/control-spec.txt
 This package is produced independently of, and carries no guarantee from,
 The Tor Project.
 
+See `man tor-ctrl` for usage. The companion commands `tor-ctrl-circuit`,
+`tor-ctrl-stream`, `tor-ctrl-observer` and `tor-ctrl-onion` print their usage
+with `-h`.
+
 ## How to install `tor-ctrl` using apt-get ##
 
 1\. Download the APT Signing Key.

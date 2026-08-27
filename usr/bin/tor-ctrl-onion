@@ -12,9 +12,9 @@
 ##  - the control connection that originated the "ADD_ONION" command is closed.
 ## It is possible to override disabling the Onion Service on control connection close by specifying the "Detach" flag.
 
-## Functions reached only through traps and the option dispatch below, which
-## shellcheck reads as unreachable.
-# shellcheck disable=SC2317
+## FIXME: Fix the automated shellcheck tests so that helper-scripts is
+## available when shellcheck is run. Do not add back a shellcheck override that
+## assumes helper-scripts is missing.
 
 set -o errexit
 set -o nounset
@@ -26,15 +26,11 @@ shopt -s shift_verbose
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/strings.bsh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh
 
-## sets: has
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/has.sh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 
 me="${0##*/}"
 
-## Every option flag and every 'get_arg' target. Each is assigned only when
-## its option is given, and each is read below through a '[ -n ]' / '[ -z ]'
-## test, so empty is exactly what these expanded to before strict mode.
 add_onion=""
 client_pub_key=""
 del_onion=""
@@ -220,20 +216,12 @@ get_arg(){
   value="${arg}"
   # shellcheck disable=SC2140
   check_variable_name "${1}" || exit 1
-  ## SINGLE quotes: with double quotes the shell expands ${value} BEFORE eval
-  ## parses the result, so a value containing ';' or spaces is executed as
-  ## further commands -- 'tor-ctrl-onion -k "x; id"' ran 'id'. Single-quoting
-  ## makes eval expand it, and the printf %q escaping keeps a literal quote in
-  ## the value from closing the string.
   printf -v value_quoted '%q' "${value}"
   eval "${1}"="${value_quoted}"
 }
 
 ## hacky getopts
 while :; do
-  ## The loop runs until the arguments are exhausted, so its last iteration
-  ## reads an unset $1 by design -- the '*)' arm is what ends it. '$2' is unset
-  ## whenever the final argument is an option without its value.
   case "${1:-}" in
     -*)
       opt="${1#*-}"
@@ -306,9 +294,6 @@ while :; do
       shift 2
       ;;
     n)
-      ## Holds the literal control-spec argument rather than a boolean, so the
-      ## emit site can expand it unquoted and contribute nothing when unset --
-      ## the same idiom ADD_ONION uses for its optional arguments.
       permanent_auth="Flags=Permanent"
       shift 1
       ;;
@@ -389,14 +374,6 @@ if [ -n "${add_onion}" ]; then
     test -d "${permanent_onion_save}" || error_msg "Permanent directory to save onion does not exist: ${permanent_onion_save}"
     trap "exit_handler" INT EXIT
     printf '%s\n' "${port} ${client_pub_key} ${max_streams} ${flags}" | tr -s " " | tee -- "${permanent_onion_save%*/}/onion.tmp"
-    ## client_pub_key, max_streams and flags are optional argument FRAGMENTS:
-    ## each is either empty or a whole 'Name=value' word. Quoting them would
-    ## pass an empty argument to ADD_ONION when the option was not given,
-    ## which is a different command, so the splitting is deliberate.
-    ## 'exit_code' is captured explicitly, so errexit must NOT abort here:
-    ## under strict mode a failing tor-ctrl (bad password, 510 reply) or a grep
-    ## that matches nothing killed the script BEFORE the 'Failed to create
-    ## onion' message below could run.
     exit_code=0
     # shellcheck disable=SC2086,SC2248
     tor-ctrl ${cli_args} ADD_ONION "${key}" "${port}" ${client_pub_key} ${max_streams} ${flags} | grep -- "^250-" | tee -a -- "${permanent_onion_save%*/}/onion.tmp" \
@@ -438,10 +415,6 @@ if [ -n "${add_onion}" ]; then
       error_msg "Permanent directory or file to restore onion does not exist: ${permanent_onion_restore}"
     fi
   else
-    ## client_pub_key, max_streams and flags are optional argument FRAGMENTS:
-    ## each is either empty or a whole 'Name=value' word. Quoting them would
-    ## pass an empty argument to ADD_ONION when the option was not given,
-    ## which is a different command, so the splitting is deliberate.
     # shellcheck disable=SC2086,SC2248
     tor-ctrl ${cli_args} ADD_ONION "${key}" "${port}" ${client_pub_key} ${max_streams} ${flags} | grep -v -- "^250 "
   fi
@@ -455,20 +428,7 @@ fi
 if [ -n "${onion_client_auth_add}" ]; then
   [ -z "${onion}" ] && error_msg "This option requires an onion service to be specified, use with '-o address.onion'"
   onion="$(validate_onion "${onion}")"
-  ## '${permanent_auth}' and '${cli_args}' are DELIBERATELY UNQUOTED: each is
-  ## either empty or a flag, and quoting an empty one passes a stray empty
-  ## ARGUMENT to tor-ctrl rather than nothing at all -- for permanent_auth that
-  ## means an empty 'Flags=' field, which tor rejects. Same shape as the
-  ## bwrap_args regression earlier in this pass, where a blanket quoting sweep
-  ## broke every sandboxed launch.
-  ##
-  ## permanent_auth carries the literal 'Flags=Permanent' rather than a boolean,
-  ## so '-n' persists the credential to the ClientOnionAuthDir. Covered by
-  ## dist-ai's tor-ctrl-tests, which asserts both directions against a tor it
-  ## starts itself: ephemeral leaves that directory empty, permanent writes
-  ## '<onion>.auth_private'. tor answers 250 OK either way, so the exit status
-  ## alone cannot tell them apart.
-  # shellcheck disable=SC2248,SC2086
+  # shellcheck disable=SC2086,SC2248
   tor-ctrl ${cli_args} ONION_CLIENT_AUTH_ADD "${onion}" "${onion_client_auth_add}" ${permanent_auth}
   exit "${?}"
 fi

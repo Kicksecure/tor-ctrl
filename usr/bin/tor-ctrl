@@ -14,10 +14,6 @@
 ## to configure the control method (ControlPort/ControlSocket) and the
 ## authentication method (CookieAuthentication/HashedControlPassword).
 
-## Needs bash 4.4 or newer: 'inherit_errexit' does not exist before it, and an
-## older bash dies here with a fatal shopt error. Not a package dependency --
-## bash is Essential in Debian and every supported release ships 5.x -- but it
-## constrains standalone use on other unix systems. See README.md Requirements.
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -28,19 +24,17 @@ shopt -s shift_verbose
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/strings.bsh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh
 
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/has.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
+
 ## script version
 torctrl_version="5.0.0"
 
 ## script name
 me="${0##*/}"
 
-## Option flags and the environment-provided socket. Each is assigned only when
-## its option is passed, and every read below is a '[ -n ]' / '[ -z ]' test, so
-## initialising to empty keeps those tests reading exactly as they did before.
-##
 ## TOR_CONTROL_HOST stays EMPTY rather than defaulting to 127.0.0.1: an empty
-## host with a set port is a supported case, which check_socket handles through
-## its dedicated '":"[0-9]*' arm.
+## host with a set port is a supported case.
 quiet=""
 machine_mode=""
 debug_mode=""
@@ -52,20 +46,14 @@ tor_control_socket=""
 tor_password=""
 wait_confirmation=""
 
-## Read by a '[ -z ]' guard BEFORE the search loop that assigns them, so the
-## "install one of these programs" errors are what must fire when nothing is
-## found -- not a nounset abort.
 socket_prog=""
 hex_prog=""
 
-## Assigned only on the branch that parses a TCP socket, but read on error
-## paths reachable from the unix-socket branch too. Empty is what these
-## expanded to before strict mode.
 tor_control_host=""
 tor_control_port=""
 tor_control_unix=""
-TOR_CONTROL_HOST="${TOR_CONTROL_HOST:-}"
-TOR_CONTROL_PORT="${TOR_CONTROL_PORT:-}"
+default_if_empty TOR_CONTROL_HOST ""
+default_if_empty TOR_CONTROL_PORT ""
 
 usage(){
   printf '%s\n' "usage: ${me}
@@ -153,14 +141,6 @@ error_msg(){
   exit 1
 }
 
-## dylanaraps/pfetch has function
-## fail if program is not installed on path or not executable
-## style-ok: no-has -- this is the definition of 'has'; it cannot call itself.
-has() {
-  _cmd=$(command -v "${1}") 2>/dev/null || return 1
-  [ -x "${_cmd}" ] || return 1
-}
-
 ## check if required programs are installed
 check_progs(){
   prog_net="nc netcat socat telnet"
@@ -197,22 +177,12 @@ get_socket(){
   ## Jan 1 00:00:00.000 [notice] Including configuration file
   ## "/usr/local/etc/torrc.d//50_user.conf".
   # shellcheck disable=SC2086
-  ## '|| true' because a no-match is EXPECTED, not an error, and the guard for
-  ## it is the '[ -n ]' test below. Under pipefail this pipeline fails when the
-  ## grep matches nothing, and also when '--verify-config' itself fails -- which
-  ## the comment above says to ignore, since it fails whenever tor-ctrl is not
-  ## run as root or the tor user. Aborting here would skip the documented
-  ## fallback to 127.0.0.1:9051.
   tor_config_files="$(${tor_start_command:-tor} --verify-config | grep -E -- " Read configuration file [^ ]*| Including configuration file [^ ]*" | awk '{print $NF}' | sed "s/\"//;s/\".//;s/\/\//\//")" || true
 
   ## grepping no file will be stuck forever
   if [ -n "${tor_config_files}" ]; then
     ## only one option is needed, use head
     # shellcheck disable=SC2086
-    ## '|| true' for the same reason: a torrc with NEITHER ControlPort nor
-    ## ControlSocket is the DEFAULT Debian configuration, so this grep matching
-    ## nothing is the common case. 'head -n 1' also closes the pipe early, which
-    ## pipefail reports as failure on its own.
     tor_control_socket_filesystem="$(grep -E -- "^ControlPort [^ ]*|^ControlSocket [^ ]*" ${tor_config_files} | cut -d ":" -f2- | cut -d " " -f2 | sed "s/\"//g;s/unix\://" | head -n 1)" || true
   fi
 }
@@ -313,22 +283,15 @@ check_socket(){
         ;;
         telnet)
           socket_prog_connect="${socket_prog} ${tor_control_host} ${tor_control_port}"
-          telnet_close=$'\x1dclose\x0d'
-          ## Read into a variable rather than piping into 'grep -q'. 'grep -q'
-          ## exits as soon as it matches and closes the pipe, so telnet takes
-          ## SIGPIPE and exits 141 -- and pipefail then reports the whole
-          ## pipeline as failed even though the connection SUCCEEDED, turning a
-          ## working telnet socket into "Connection refused".
-          telnet_output="$(printf '%s' "${telnet_close}" | ${socket_prog_connect} 2>/dev/null || true)"
-          grep --quiet -- "Connected to ${tor_control_host}" <<< "${telnet_output}" || {
+          printf '%s\n' "\x1dclose\x0d" | ${socket_prog_connect} 2>/dev/null | grep -- "Connected to ${tor_control_host}" >/dev/null 2>&1 || {
             printf '%s\n' "${socket_prog}: Connection refused to ${tor_control_host}:${tor_control_port}" | tee -a -- "${temp_dir}/fail.log" >/dev/null
             return 1
           }
         ;;
       esac
 
-      ## Read only indirectly, through the 'eval val=$"${key}"' loop in
-      ## get_dry_run, which shellcheck cannot follow.
+      ## Read indirectly, through the 'eval val=$"${key}"' loop in
+      ## get_dry_run.
       # shellcheck disable=SC2034
       tor_socket="${tor_control_host}:${tor_control_port}"
     ;;
@@ -337,17 +300,9 @@ check_socket(){
 
 ## get string to authenticate to the controller
 login(){
-  ## '|| true' INSIDE the substitution: no AUTH line is a state this function is
-  ## built to report, not an error. Without it the failing grep aborts under
-  ## errexit and the "Authentication method not detected" block below -- which
-  ## exists for exactly this case -- is never reached. It must sit before the
-  ## closing ')', or it becomes literal text in the value instead of guarding the
-  ## pipeline.
-  auth="$({ send_cmd "PROTOCOLINFO"; send_cmd "QUIT"; } | ${socket_prog_connect} 2>/dev/null | grep -- "AUTH" || true)"
+  auth="$({ send_cmd "PROTOCOLINFO"; send_cmd "QUIT"; } | ${socket_prog_connect} 2>/dev/null | grep -- "AUTH")" || true
   ## The control protocol terminates lines with CRLF. Strip the CR before the
-  ## anchored method greps below: with HASHEDPASSWORD there is no trailing
-  ## COOKIEFILE= field to carry it away, so it would stay on the method name
-  ## itself and '^HASHEDPASSWORD$' would never match.
+  ## anchored method greps below.
   auth_methods="$(printf '%s\n' "${auth}" | sed "s/250-AUTH METHODS=//" | cut -d " " -f1 | tr -d "\\r" | tr "," "\n")"
   tor_cookie="$(printf '%s\n' "${auth}" | sed "s/.*COOKIEFILE=//" | tr -d "\"" | tr -d "\\r")"
 
@@ -357,22 +312,14 @@ login(){
     fi
   fi
 
-  ## Assigned only inside the branches below, and read unconditionally after
-  ## them. When Tor offers no method this caller can use -- HASHEDPASSWORD with
-  ## no -p, or COOKIE with an unreadable cookie -- none of them fires, and the
-  ## '-z' test aborted instead of printing the "no supported auth method"
-  ## message that exists for exactly this case.
   auth_string=""
 
-  if grep --quiet -- "NULL" <<< "${auth_methods}"; then
+  ## '<<<' redirection can strip things we don't want stripped.
+  if printf '%s\n' "${auth_methods}" | grep -- "NULL" >/dev/null 2>&1; then
     auth_string="AUTHENTICATE"
   elif test -r "${tor_cookie}"; then
-    ## '|| true' for the same reason as the AUTH grep above: an absent method is
-    ## the normal case these two variables exist to express, and the '-n' tests
-    ## below are written for it. Unguarded, tor offering only one of the two
-    ## aborts here instead.
-    safecookie_enabled="$(printf '%s\n' "${auth_methods}" | grep -- "^SAFECOOKIE$" || true)"
-    cookie_enabled="$(printf '%s\n' "${auth_methods}" | grep -- "^COOKIE$" || true)"
+    safecookie_enabled="$(printf '%s\n' "${auth_methods}" | grep -- "^SAFECOOKIE$")" || true
+    cookie_enabled="$(printf '%s\n' "${auth_methods}" | grep -- "^COOKIE$")" || true
     if [ -n "${cookie_enabled}" ]; then
       ## xxd is only needed when authenticating with SAFECOOKIE
       prog_converter_hex="xxd hexdump od"
@@ -394,18 +341,18 @@ login(){
     fi
   elif
     # shellcheck disable=SC2154
-    [ -n "${tor_password}" ] && grep --quiet -- "^HASHEDPASSWORD$" <<< "${auth_methods}" ; then
+    [ -n "${tor_password}" ] && printf '%s\n' "${auth_methods}" | grep -- "^HASHEDPASSWORD$" >/dev/null 2>&1; then
     auth_string="AUTHENTICATE \"${tor_password}\""
   fi
 
   if [ -z "${auth_string}" ]; then
     auth_failed=""
     printf '%s\n' "${me}: Authentication method not detected."
-    if grep --quiet -- "^COOKIE$" <<< "${auth_methods}" && ! test -r "${tor_cookie}"; then
+    if printf '%s\n' "${auth_methods}" | grep -- "^COOKIE$" && ! test -r "${tor_cookie}" >/dev/null 2>&1; then
       printf '%s\n' "${me}: COOKIE is enabled but not readable by user ${USER}."
       auth_failed=1
     fi
-    if grep --quiet -- "^HASHEDPASSWORD$" <<< "${auth_methods}" && [ -z "${tor_password}" ]; then
+    if printf '%s\n' "${auth_methods}" | grep -- "^HASHEDPASSWORD$" >/dev/null 2>&1 && [ -z "${tor_password}" ]; then
       printf '%s\n' "${me}: HASHEDPASSWORD is enabled but no password provided on the command line."
       auth_failed=1
     fi
@@ -452,10 +399,7 @@ cmd_pipe(){
 finish(){
   str="$(cat)"
   [ -z "${quiet}" ] && printf '%s\n' "${str}"
-  ## '|| true': 'grep -c' exits 1 when the count is ZERO, which under errexit
-  ## aborted before the comparison below could decide the exit status. The
-  ## outcome happened to match, but only by coincidence.
-  counter="$(printf '%s\n' "${str}" | grep -c -- "^250 " || true)"
+  counter="$(printf '%s\n' "${str}" | grep -c -- "^250 ")" || true
   ## more than 3 '^250 ' reply status code occurs when $cmd_cli has multiple lines (\\n)
   if [ "${counter}" -ge "3" ]; then
     exit 0
@@ -488,19 +432,12 @@ get_arg(){
   ## Escaping quotes is needed because else it will fail if the argument is quoted
   # shellcheck disable=SC2140
   check_variable_name "${1}" || exit 1
-  ## SINGLE quotes: with double quotes the shell expands ${value} BEFORE eval
-  ## parses the result, so a value containing ';' or spaces is executed as
-  ## further commands -- 'tor-ctrl-onion -k "x; id"' ran 'id'. Single-quoting
-  ## makes eval expand it, and the printf %q escaping keeps a literal quote in
-  ## the value from closing the string.
   printf -v value_quoted '%q' "${value}"
   eval "${1}"="${value_quoted}"
 }
 
 ## hacky getopts
 while :; do
-  ## '${1:-}': the loop runs until the arguments are exhausted, so the last
-  ## iteration reads an unset $1 by design -- the '*)' arm below is what ends it.
   case "${1:-}" in
     --?*)
       opt="${1#*--}"

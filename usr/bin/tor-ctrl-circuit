@@ -1,12 +1,12 @@
 #!/bin/bash
 
 ## Copyright (C) 2021 - 2022 nyxnor <nyxnor@protonmail.com>
-## Copyright (C) 2013 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@riseup.net>
+## Copyright (C) 2013 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
 ## See the file COPYING for copying conditions.
 
-## The colour palette comes from the sourced get_colors.sh, which shellcheck
-## cannot follow in an isolated checkout.
-# shellcheck disable=SC2154
+## FIXME: Fix the automated shellcheck tests so that helper-scripts is
+## available when shellcheck is run. Do not add back a shellcheck override that
+## assumes helper-scripts is missing.
 
 set -o errexit
 set -o nounset
@@ -18,25 +18,15 @@ shopt -s shift_verbose
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/strings.bsh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh
 
-## sets: has
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/has.sh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 
-## sets: pad_right, pad_left
-# shellcheck source=../libexec/tor-ctrl/pad.bsh
-source /usr/libexec/tor-ctrl/pad.bsh
-
 me="${0##*/}"
 
-## Assigned only when the matching option is given, and every read below is a
-## '[ -n ]' test, so empty is what these expanded to before strict mode.
 tor_control_socket=""
 tor_password=""
 machine_mode=""
 
-## sets: nocolor, bold, yellow and the rest of the palette, already emptied
-## when the terminal cannot render them -- no TERM, TERM=dumb, NO_COLOR, or
-## stderr not a terminal. Replaces two inline ANSI definitions.
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/get_colors.sh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/get_colors.sh
 
@@ -47,6 +37,9 @@ source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/get_colors.sh
 ##
 ## This does not reimplement the palette: it still comes from get_colors.sh.
 ## It applies the same tty rule that file applies, to the correct descriptor.
+##
+## FIXME: Let's make get_colors.sh provide blank color variables if either
+## stdout OR stderr is redirected.
 if [ ! -t 1 ]; then
    yellow=""
    nocolor=""
@@ -81,9 +74,6 @@ error_msg(){
 list_circuits(){
   # shellcheck disable=SC2086
   circuit_all="$(tor-ctrl -c "GETINFO circuit-status" ${cli_args})"
-  ## '%s', not '%b': get_colors.sh stores real escape BYTES, so there is
-  ## nothing left for %b to decode -- and %b would additionally interpret any
-  ## backslash that appeared in the message text.
   printf '%s\n' "${yellow}${me}: [warn] Do not share this information publicly, it could deanonymize yourself.${nocolor}"
   circuit_all="$(printf '%s\n' "${circuit_all}" | sed "/250 OK/d;/250+circuit-status=/d;/250 closing connection/d")"
   printf '%s\n' "${circuit_all}" | while IFS=$'\n' read -r circuit || [ -n "${circuit}" ]; do
@@ -102,36 +92,21 @@ list_circuits(){
         relay_nickname="$(printf '%s\n' "${relay}" | cut -d " " -f2)"
         # shellcheck disable=SC2086
         relay_status="$(tor-ctrl -c "GETINFO ns/id/${relay_fingerprint}" ${cli_args})"
-        relay_host="$(printf '%s\n' "${relay_status}" | grep -- "^r " | cut -d " " -f7 || true)"
-        relay_bandwidth="$(printf '%s\n' "${relay_status}" | grep -- "^w " | sed "s/w Bandwidth=//;s/\\r//" || true)"
+        relay_host="$(printf '%s\n' "${relay_status}" | grep -- "^r " | cut -d " " -f7)" || true
+        relay_bandwidth="$(printf '%s\n' "${relay_status}" | grep -- "^w " | sed "s/w Bandwidth=//;s/\\r//")"  || true
         if ! is_whole_number "${relay_bandwidth}"; then
           relay_bandwidth=0
         fi
         relay_bandwidth="$((relay_bandwidth*512/1024/1024)) MiB/s"
         # shellcheck disable=SC2086
         relay_locale="$(tor-ctrl -c "GETINFO ip-to-country/${relay_host}" ${cli_args})"
-        ## '|| true': tor omits the country line for a relay whose IP it
-        ## cannot map, and grep then exits 1. Before strict mode that left
-        ## relay_locale empty and the row still printed; under errexit it
-        ## aborted the ENTIRE listing partway through.
-        relay_locale="$(printf '%s\n' "${relay_locale}" | grep -F -- "250-ip-to-country/${relay_host}=" | sed "s/.*=//;s/\\r//" || true)"
-        ## Columns padded in shell rather than with a printf field width; see
-        ## the note in pad.bsh. Widths match the previous
-        ## '%1s. %-40s %-15s %-19s (%-2s) %9s' exactly.
-        hop_column="$(pad_left "${hop}" 1)"
-        fingerprint_column="$(pad_right "${relay_fingerprint}" 40)"
-        host_column="$(pad_right "${relay_host}" 15)"
-        nickname_column="$(pad_right "${relay_nickname}" 19)"
-        locale_column="$(pad_right "${relay_locale}" 2)"
-        bandwidth_column="$(pad_left "${relay_bandwidth}" 9)"
-        printf '%s\n' "${hop_column}. ${fingerprint_column} ${host_column} ${nickname_column} (${locale_column}) ${bandwidth_column}"
+        relay_locale="$(printf '%s\n' "${relay_locale}" | grep -F -- "250-ip-to-country/${relay_host}=" | sed "s/.*=//;s/\\r//")" || true
+        #printf '%s. %s [%s, %s, (%s), %s]\n' "${hop}" "${relay_fingerprint}" "${relay_nickname}" "${relay_host}" "${relay_locale}" "${relay_bandwidth}"
+        printf '%1s. %-40s %-15s %-19s (%-2s) %9s\n' "${hop}" "${relay_fingerprint}" "${relay_host}" "${relay_nickname}" "${relay_locale}" "${relay_bandwidth}"
       done
       printf '%s\n' ""
     fi
   done
-  ## '%s', not '%b': get_colors.sh stores real escape BYTES, so there is
-  ## nothing left for %b to decode -- and %b would additionally interpret any
-  ## backslash that appeared in the message text.
   printf '%s\n' "${yellow}${me}: [warn] Do not share this information publicly, it could deanonymize yourself.${nocolor}"
 }
 
@@ -163,12 +138,6 @@ cli_args=""
 : "${machine_mode:=0}"
 
 ## only to get which socket it successfully connects
-## cli_args is a pre-split option string, so the expansion must NOT be quoted.
-##
-## The grep finds nothing when the notice is suppressed, which is not an error --
-## but a bare '|| true' also swallows a FAILING tor-ctrl query, which is the one
-## thing this probe exists to report on. Capture PIPESTATUS instead and tolerate
-## only the documented case: tor-ctrl succeeded and grep matched nothing.
 probe_status=()
 # shellcheck disable=SC2086
 tor-ctrl -c "GETINFO circuit-status" ${cli_args} | grep -- "connecting to socket with command" || probe_status=("${PIPESTATUS[@]}")
@@ -177,8 +146,9 @@ if [ "${#probe_status[@]}" -gt 0 ]; then
   if [ "${probe_status[0]}" != "0" ]; then
     error_msg "tor-ctrl could not query the controller (exit ${probe_status[0]})."
   fi
-  ## 1 is grep's "no match"; anything else is a real grep failure.
-  if [ "${probe_status[1]}" != "1" ]; then
+  ## In theory, tor-ctrl could error out but still print something that grep
+  ## can match.
+  if [ "${probe_status[1]}" -gt 1 ]; then
     error_msg "reading the socket notice failed (grep exit ${probe_status[1]})."
   fi
 fi
