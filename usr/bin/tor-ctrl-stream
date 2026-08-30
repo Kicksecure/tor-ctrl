@@ -1,14 +1,62 @@
 #!/bin/bash
 
-source /usr/libexec/helper-scripts/strings.bsh
+## Copyright (C) 2021 - 2022 nyxnor <nyxnor@protonmail.com>
+## Copyright (C) 2013 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
 
-#nocolor="\033[0m"
-#bold="\033[1m"
-## TODO: colors versus stecho
-nocolor=""
-bold=""
+## FIXME: Fix the automated shellcheck tests so that helper-scripts is
+## available when shellcheck is run. Do not add back a shellcheck override that
+## assumes helper-scripts is missing.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/strings.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh
+
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/has.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
+
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/get_colors.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/get_colors.sh
+
+## get_colors.sh decides by testing fd 2 (stderr) -- see its '! test -t 2'. This
+## script writes the palette to STDOUT, so a redirected report or a pipe into
+## another program would receive ANSI bytes whenever stderr merely happened to
+## be a terminal. Gate on the stream the colours actually land on.
+##
+## This does not reimplement the palette: it still comes from get_colors.sh.
+## It applies the same tty rule that file applies, to the correct descriptor.
+##
+## FIXME: Let's make get_colors.sh provide blank color variables if either
+## stdout OR stderr is redirected.
+if [ ! -t 1 ]; then
+   bold=""
+   nocolor=""
+fi
+
 
 me="${0##*/}"
+
+tor_control_socket=""
+tor_password=""
+machine_mode=""
+no_circuit=""
+client_filter=""
+temp_dir=""
+stream_target_orig=""
+stream_target_clean=""
+stream_purpose=""
+stream_client=""
+
+error_msg(){
+  printf '%s\n' "${me}: [error] ${1}" >&2
+  exit 1
+}
 
 usage(){
   printf '%s\n' "usage: ${me} [-mzh] [-s socket] [-p password]
@@ -55,30 +103,29 @@ list_streams(){
   trap "exit_handler" EXIT
 
   listen_stream="$(cat -- "${temp_dir}/.stream.tmp")"
-  for stream_ordered in $(printf '%s\n' "${listen_stream}" | grep -- "^650 STREAM" | cut -d " " -f3 | sort -u | grep -v -- "^[[:space:]]*$" | grep -v -- "^250" ); do
-    ## TODO: Should the second printf be '%s\n' instead of only '\n'?
-    printf '%s\n' "${listen_stream}" | grep -- "^650 STREAM ${stream_ordered}" | while IFS="$(printf '\n')" read -r stream_line; do
+  for stream_ordered in $(printf '%s\n' "${listen_stream}" | grep -- "^650 STREAM" | cut -d " " -f3 | sort -u | grep -v -- "^[[:space:]]*$" | grep -v -- "^250" || true); do
+    printf '%s\n' "${listen_stream}" | grep -- "^650 STREAM ${stream_ordered}" | while IFS=$'\n' read -r stream_line; do
       IFS=" " read -r _ _ stream_id stream_status circuit_id stream_target _ <<-EOF
         $(printf '%s' "${stream_line}")
 EOF
       case "${stream_status}" in
         NEW|NEWRESOLVE)
           stream_target_orig="${stream_target}"
-          stream_purpose="$(printf '%s\n' "${stream_line}" | tr " " "\n" | grep -- "PURPOSE=" | sed "s/PURPOSE=//")"
-          stream_client="$(printf '%s\n' "${stream_line}" | tr " " "\n" | grep -- "SOURCE_ADDR=" | sed "s/SOURCE_ADDR=//")"
+          stream_purpose="$(printf '%s\n' "${stream_line}" | tr " " "\n" | grep -- "PURPOSE=" | sed "s/PURPOSE=//")" || true
+          stream_client="$(printf '%s\n' "${stream_line}" | tr " " "\n" | grep -- "SOURCE_ADDR=" | sed "s/SOURCE_ADDR=//")" || true
 	  test -n "${client_filter}" && [ "${client_filter%:*}" != "${stream_client%:*}" ] && break
         ;;
         REMAP)
           stream_target_cache="$(printf '%s\n' "$(cat -- "${temp_dir}/.stream.hosts" 2>/dev/null) ${stream_target_orig%:*}=${stream_target%:*}")"
           printf '%s\n' "${stream_target_cache}" | tee -- "${temp_dir}/.stream.hosts" >/dev/null
-          stream_target_hostname="$(printf '%s\n' "${stream_target_cache}" | tr " " "\n" | grep -F -- "=${stream_target%:*}" | head -n 1 | sed "s|=.*||")"
+          stream_target_hostname="$(printf '%s\n' "${stream_target_cache}" | tr " " "\n" | grep -F -- "=${stream_target%:*}" | head -n 1 | sed "s|=.*||")" || true
           stream_target_clean="$(printf '%s\n' "${stream_target_hostname}~(${stream_target})")"
         ;;
         CLOSED|SUCCEEDED)
           [ -n "${stream_target_clean}" ] && stream_target="${stream_target_clean}"
           # shellcheck disable=SC2086
           circuit_all="$(tor-ctrl -c "GETINFO circuit-status" ${cli_args})"
-          circuit="$(printf '%s\n' "${circuit_all}" | grep -- "^${circuit_id} " | sed "/250 OK/d;/250+circuit-status=/d;/250 closing connection/d")"
+          circuit="$(printf '%s\n' "${circuit_all}" | grep -- "^${circuit_id} " | sed "/250 OK/d;/250+circuit-status=/d;/250 closing connection/d")" || true
           circuit_status="$(printf '%s\n' "${circuit}" | cut -d " " -f2)"
           circuit_path="$(printf '%s\n' "${circuit}" | cut -d " " -f3)"
           circuit_purpose="$(printf '%s\n' "${circuit}" | cut -d " " -f5 | sed "s/PURPOSE=//")"
@@ -94,21 +141,21 @@ EOF
             hop=0
             for relay in $(printf '%s\n' "${circuit_path}" | tr "," " "); do
               hop=$((hop+1))
-              [ ${hop} -gt 3 ] && break
+              [ "${hop}" -gt 3 ] && break
               relay="$(printf '%s\n' "${relay}" | tr -d "$" | tr "~" " ")"
               relay_fingerprint="$(printf '%s\n' "${relay}" | cut -d " " -f1)"
               relay_nickname="$(printf '%s\n' "${relay}" | cut -d " " -f2)"
               # shellcheck disable=SC2086
               relay_status="$(tor-ctrl -c "GETINFO ns/id/${relay_fingerprint}" ${cli_args})"
-              relay_host="$(printf '%s\n' "${relay_status}" | grep -- "^r " | cut -d " " -f7)"
-              relay_bandwidth="$(printf '%s\n' "${relay_status}" | grep -- "^w " | sed "s/w Bandwidth=//;s/\\r//")"
+              relay_host="$(printf '%s\n' "${relay_status}" | grep -- "^r " | cut -d " " -f7)" || true
+              relay_bandwidth="$(printf '%s\n' "${relay_status}" | grep -- "^w " | sed "s/w Bandwidth=//;s/\\r//")" || true
               if ! is_whole_number "${relay_bandwidth}"; then
                 relay_bandwidth=0
               fi
               relay_bandwidth="$((relay_bandwidth*512/1024/1024)) MiB/s"
               # shellcheck disable=SC2086
               relay_locale="$(tor-ctrl -c "GETINFO ip-to-country/${relay_host}" ${cli_args})"
-              relay_locale="$(printf '%s\n' "${relay_locale}" | grep -F -- "250-ip-to-country/${relay_host}=" | sed "s/.*=//;s/\\r//")"
+              relay_locale="$(printf '%s\n' "${relay_locale}" | grep -F -- "250-ip-to-country/${relay_host}=" | sed "s/.*=//;s/\\r//")" || true
               printf '%1s. %-40s %-15s %-19s %-4s %9s\n' "${hop}" "${relay_fingerprint}" "${relay_host}" "${relay_nickname}" "(${relay_locale})" "${relay_bandwidth}"
             done
             printf "%s\n" "${bold}------------------------------------------------------------------------------------------------------${nocolor}"
@@ -116,9 +163,9 @@ EOF
             ! test -f "${temp_dir}/.stream.loop" && {
               touch -- "${temp_dir}/.stream.loop"
               printf "%s\n" ""
-              printf "ID Purpose Client CircID CircPurpose Target"
+              printf '%s' "ID Purpose Client CircID CircPurpose Target"
               #printf '\n%6s %-20s %-21s %6s %-20s %-62s\n' "ID" "Purpose" "Client" "CircID" "CircPurpose" "Target"
-              printf "%s" "------------------------------------------------------------------------------------------------------"
+              printf '%s' "------------------------------------------------------------------------------------------------------"
             }
             ## Stream purpose is unknown for tor-ctrl if it was an end of stream that we didn't catch the creation
             ## unknown us being specified for proper field separation
@@ -135,16 +182,28 @@ EOF
 
 #set -x
 
-command -v tor-ctrl >/dev/null || error_msg "Install tor-ctrl"
+has tor-ctrl || error_msg "Install tor-ctrl"
 
 while getopts ":s:p:a:mzh" Option; do
   case ${Option} in
-    s) tor_control_socket="${OPTARG}";;
-    p) tor_password="${OPTARG}";;
-    m) machine_mode=1;;
-    z) no_circuit=1;;
-    a) client_filter="${OPTARG}";;
-    h|*) usage;;
+    s)
+      tor_control_socket="${OPTARG}"
+      ;;
+    p)
+      tor_password="${OPTARG}"
+      ;;
+    m)
+      machine_mode=1
+      ;;
+    z)
+      no_circuit=1
+      ;;
+    a)
+      client_filter="${OPTARG}"
+      ;;
+    h|*)
+      usage
+      ;;
   esac
 done
 

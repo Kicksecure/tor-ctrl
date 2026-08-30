@@ -12,10 +12,48 @@
 ##  - the control connection that originated the "ADD_ONION" command is closed.
 ## It is possible to override disabling the Onion Service on control connection close by specifying the "Detach" flag.
 
+## FIXME: Fix the automated shellcheck tests so that helper-scripts is
+## available when shellcheck is run. Do not add back a shellcheck override that
+## assumes helper-scripts is missing.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
 # shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/strings.bsh
-source /usr/libexec/helper-scripts/strings.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh
+
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/has.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 
 me="${0##*/}"
+
+add_onion=""
+client_pub_key=""
+del_onion=""
+discard_pk=""
+flags=""
+key=""
+list_onion=""
+machine_mode=""
+max_streams=""
+non_anonymous=""
+onion=""
+onion_client_auth_add=""
+onion_client_auth_remove=""
+onion_client_auth_view=""
+onion_id_file_realpath=""
+permanent_auth=""
+permanent_onion_restore=""
+permanent_onion_save=""
+permanent_onion_save_realpath=""
+port=""
+tor_control_socket=""
+tor_password=""
+wait_confirmation=""
 
 usage(){
   printf '%s\n' "usage: ${me} [-mh] [-s socket] [-p password]
@@ -163,7 +201,7 @@ exit_handler() {
   return 0
 }
 
-command -v tor-ctrl >/dev/null || error_msg "Install tor-ctrl"
+has tor-ctrl || error_msg "Install tor-ctrl"
 
 ############
 ### opts ###
@@ -171,53 +209,130 @@ command -v tor-ctrl >/dev/null || error_msg "Install tor-ctrl"
 get_arg(){
   ## if argument is empty or starts with '-', fail as it possibly is an option
   case "${arg}" in
-    ""|-*) error_msg "Option '${opt}' requires an argument.";;
+    ""|-*)
+      error_msg "Option '${opt}' requires an argument."
+      ;;
   esac
   value="${arg}"
   # shellcheck disable=SC2140
   check_variable_name "${1}" || exit 1
-  eval "${1}"="\"${value}\""
+  printf -v value_quoted '%q' "${value}"
+  eval "${1}"="${value_quoted}"
 }
 
 ## hacky getopts
 while :; do
-  case "${1}" in
-    -*) opt="${1#*-}"; arg="${2}";;
-    *) opt="${1}";;
+  case "${1:-}" in
+    -*)
+      opt="${1#*-}"
+      arg="${2:-}"
+      ;;
+    *)
+      opt="${1:-}"
+      ;;
   esac
   case "${opt}" in
-    o) get_arg onion; shift 2;;
+    o)
+      get_arg onion
+      shift 2
+      ;;
 
     ## server
-    A) add_onion=1; shift 1;;
-    k) get_arg key; shift 2;;
-    l) get_arg port; shift 2;;
-    w) wait_confirmation=1; shift 1;;
-    u) get_arg client_pub_key; shift 2;;
-    i) discard_pk=1; shift 1;;
-    y) non_anonymous=1; shift 1;;
-    x) get_arg max_streams; shift 2;;
-    P) get_arg permanent_onion_save; shift 2;;
-    E) get_arg permanent_onion_restore; shift 2;;
+    A)
+      add_onion=1
+      shift 1
+      ;;
+    k)
+      get_arg key
+      shift 2
+      ;;
+    l)
+      get_arg port
+      shift 2
+      ;;
+    w)
+      wait_confirmation=1
+      shift 1
+      ;;
+    u)
+      get_arg client_pub_key
+      shift 2
+      ;;
+    i)
+      discard_pk=1
+      shift 1
+      ;;
+    y)
+      non_anonymous=1
+      shift 1
+      ;;
+    x)
+      get_arg max_streams
+      shift 2
+      ;;
+    P)
+      get_arg permanent_onion_save
+      shift 2
+      ;;
+    E)
+      get_arg permanent_onion_restore
+      shift 2
+      ;;
 
-    L) list_onion=1; shift 1;;
-    D) del_onion=1; shift 1;;
+    L)
+      list_onion=1
+      shift 1
+      ;;
+    D)
+      del_onion=1
+      shift 1
+      ;;
 
     ## client
-    U) get_arg onion_client_auth_add; shift 2;;
-    n) permanent_auth=1; shift 1;;
-    R) onion_client_auth_remove=1; shift 1;;
-    W) onion_client_auth_view=1; shift 1;;
+    U)
+      get_arg onion_client_auth_add
+      shift 2
+      ;;
+    n)
+      permanent_auth="Flags=Permanent"
+      shift 1
+      ;;
+    R)
+      onion_client_auth_remove=1
+      shift 1
+      ;;
+    W)
+      onion_client_auth_view=1
+      shift 1
+      ;;
 
     ## general
-    s) get_arg tor_control_socket; shift 2;;
-    p) get_arg tor_password; shift 2;;
-    m) machine_mode=1; shift 1;;
+    s)
+      get_arg tor_control_socket
+      shift 2
+      ;;
+    p)
+      get_arg tor_password
+      shift 2
+      ;;
+    m)
+      machine_mode=1
+      shift 1
+      ;;
 
-    h) usage;;
-    -) shift 1; break;;
-    "") break;;
-    *) break;; ## it could be be usage instead of break, but then would need to use '--' to end option parsing
+    h)
+      usage
+      ;;
+    -)
+      shift 1
+      break
+      ;;
+    "")
+      break
+      ;;
+    *) ## it could be be usage instead of break, but then would need to use '--' to end option parsing
+      break
+      ;;
   esac
 done
 
@@ -259,9 +374,10 @@ if [ -n "${add_onion}" ]; then
     test -d "${permanent_onion_save}" || error_msg "Permanent directory to save onion does not exist: ${permanent_onion_save}"
     trap "exit_handler" INT EXIT
     printf '%s\n' "${port} ${client_pub_key} ${max_streams} ${flags}" | tr -s " " | tee -- "${permanent_onion_save%*/}/onion.tmp"
-    # shellcheck disable=SC2086
-    tor-ctrl ${cli_args} ADD_ONION "${key}" "${port}" ${client_pub_key} ${max_streams} ${flags} | grep -- "^250-" | tee -a -- "${permanent_onion_save%*/}/onion.tmp"
-    exit_code="${?}"
+    exit_code=0
+    # shellcheck disable=SC2086,SC2248
+    tor-ctrl ${cli_args} ADD_ONION "${key}" "${port}" ${client_pub_key} ${max_streams} ${flags} | grep -- "^250-" | tee -a -- "${permanent_onion_save%*/}/onion.tmp" \
+      || exit_code="${?}"
     [ "${exit_code}" -ne 0 ] && error_msg "Failed to create onion"
     onion_id_file="$(grep -- "250-ServiceID=" "${permanent_onion_save}/onion.tmp" | sed "s/250-ServiceID=//" | tr -d "\\r")"
     onion_id_file="$(validate_onion "${onion_id_file}")"
@@ -299,7 +415,7 @@ if [ -n "${add_onion}" ]; then
       error_msg "Permanent directory or file to restore onion does not exist: ${permanent_onion_restore}"
     fi
   else
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086,SC2248
     tor-ctrl ${cli_args} ADD_ONION "${key}" "${port}" ${client_pub_key} ${max_streams} ${flags} | grep -v -- "^250 "
   fi
   exit "${?}"
@@ -312,8 +428,8 @@ fi
 if [ -n "${onion_client_auth_add}" ]; then
   [ -z "${onion}" ] && error_msg "This option requires an onion service to be specified, use with '-o address.onion'"
   onion="$(validate_onion "${onion}")"
-  # shellcheck disable=SC2086
-  tor-ctrl ${cli_args} ONION_CLIENT_AUTH_ADD "${onion}" "${onion_client_auth_add}"
+  # shellcheck disable=SC2086,SC2248
+  tor-ctrl ${cli_args} ONION_CLIENT_AUTH_ADD "${onion}" "${onion_client_auth_add}" ${permanent_auth}
   exit "${?}"
 fi
 

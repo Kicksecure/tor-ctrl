@@ -1,11 +1,50 @@
 #!/bin/bash
 
-source /usr/libexec/helper-scripts/strings.bsh
+## Copyright (C) 2021 - 2022 nyxnor <nyxnor@protonmail.com>
+## Copyright (C) 2013 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## FIXME: Fix the automated shellcheck tests so that helper-scripts is
+## available when shellcheck is run. Do not add back a shellcheck override that
+## assumes helper-scripts is missing.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/strings.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh
+
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/has.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 
 me="${0##*/}"
 
-nocolor="\033[0m"
-yellow="\033[33m"
+tor_control_socket=""
+tor_password=""
+machine_mode=""
+
+# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/get_colors.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/get_colors.sh
+
+## get_colors.sh decides by testing fd 2 (stderr) -- see its '! test -t 2'. This
+## script writes the palette to STDOUT, so a redirected report or a pipe into
+## another program would receive ANSI bytes whenever stderr merely happened to
+## be a terminal. Gate on the stream the colours actually land on.
+##
+## This does not reimplement the palette: it still comes from get_colors.sh.
+## It applies the same tty rule that file applies, to the correct descriptor.
+##
+## FIXME: Let's make get_colors.sh provide blank color variables if either
+## stdout OR stderr is redirected.
+if [ ! -t 1 ]; then
+   yellow=""
+   nocolor=""
+fi
+
 
 usage(){
   printf '%s\n' "usage: ${me} [-s socket] [-p password]
@@ -35,9 +74,9 @@ error_msg(){
 list_circuits(){
   # shellcheck disable=SC2086
   circuit_all="$(tor-ctrl -c "GETINFO circuit-status" ${cli_args})"
-  printf '%b\n' "${yellow}${me}: [warn] Do not share this information publicly, it could deanonymize yourself.${nocolor}"
+  printf '%s\n' "${yellow}${me}: [warn] Do not share this information publicly, it could deanonymize yourself.${nocolor}"
   circuit_all="$(printf '%s\n' "${circuit_all}" | sed "/250 OK/d;/250+circuit-status=/d;/250 closing connection/d")"
-  printf '%s\n' "${circuit_all}" | while IFS="$(printf '\n')" read -r circuit || [ -n "${circuit}" ]; do
+  printf '%s\n' "${circuit_all}" | while IFS=$'\n' read -r circuit || [ -n "${circuit}" ]; do
     circuit_id="$(printf '%s\n' "${circuit}" | cut -d " " -f1)"
     circuit_status="$(printf '%s\n' "${circuit}" | cut -d " " -f2)"
     circuit_path="$(printf '%s\n' "${circuit}" | cut -d " " -f3)"
@@ -53,32 +92,40 @@ list_circuits(){
         relay_nickname="$(printf '%s\n' "${relay}" | cut -d " " -f2)"
         # shellcheck disable=SC2086
         relay_status="$(tor-ctrl -c "GETINFO ns/id/${relay_fingerprint}" ${cli_args})"
-        relay_host="$(printf '%s\n' "${relay_status}" | grep -- "^r " | cut -d " " -f7)"
-        relay_bandwidth="$(printf '%s\n' "${relay_status}" | grep -- "^w " | sed "s/w Bandwidth=//;s/\\r//")"
+        relay_host="$(printf '%s\n' "${relay_status}" | grep -- "^r " | cut -d " " -f7)" || true
+        relay_bandwidth="$(printf '%s\n' "${relay_status}" | grep -- "^w " | sed "s/w Bandwidth=//;s/\\r//")"  || true
         if ! is_whole_number "${relay_bandwidth}"; then
           relay_bandwidth=0
         fi
         relay_bandwidth="$((relay_bandwidth*512/1024/1024)) MiB/s"
         # shellcheck disable=SC2086
         relay_locale="$(tor-ctrl -c "GETINFO ip-to-country/${relay_host}" ${cli_args})"
-        relay_locale="$(printf '%s\n' "${relay_locale}" | grep -F -- "250-ip-to-country/${relay_host}=" | sed "s/.*=//;s/\\r//")"
+        relay_locale="$(printf '%s\n' "${relay_locale}" | grep -F -- "250-ip-to-country/${relay_host}=" | sed "s/.*=//;s/\\r//")" || true
         #printf '%s. %s [%s, %s, (%s), %s]\n' "${hop}" "${relay_fingerprint}" "${relay_nickname}" "${relay_host}" "${relay_locale}" "${relay_bandwidth}"
         printf '%1s. %-40s %-15s %-19s (%-2s) %9s\n' "${hop}" "${relay_fingerprint}" "${relay_host}" "${relay_nickname}" "${relay_locale}" "${relay_bandwidth}"
       done
-      printf "\n"
+      printf '%s\n' ""
     fi
   done
-  printf '%b\n' "${yellow}${me}: [warn] Do not share this information publicly, it could deanonymize yourself.${nocolor}"
+  printf '%s\n' "${yellow}${me}: [warn] Do not share this information publicly, it could deanonymize yourself.${nocolor}"
 }
 
-command -v tor-ctrl >/dev/null || error_msg "Install tor-ctrl"
+has tor-ctrl || error_msg "Install tor-ctrl"
 
 while getopts ":s:p:mh" Option; do
   case ${Option} in
-    s) tor_control_socket="${OPTARG}";;
-    p) tor_password="${OPTARG}";;
-    m) machine_mode=1;;
-    h|*) usage;;
+    s)
+      tor_control_socket="${OPTARG}"
+      ;;
+    p)
+      tor_password="${OPTARG}"
+      ;;
+    m)
+      machine_mode=1
+      ;;
+    h|*)
+      usage
+      ;;
   esac
 done
 
@@ -91,6 +138,19 @@ cli_args=""
 : "${machine_mode:=0}"
 
 ## only to get which socket it successfully connects
-tor-ctrl -c "GETINFO circuit-status" ${cli_args} | grep -- "connecting to socket with command"
+probe_status=()
+# shellcheck disable=SC2086
+tor-ctrl -c "GETINFO circuit-status" ${cli_args} | grep -- "connecting to socket with command" || probe_status=("${PIPESTATUS[@]}")
+
+if [ "${#probe_status[@]}" -gt 0 ]; then
+  if [ "${probe_status[0]}" != "0" ]; then
+    error_msg "tor-ctrl could not query the controller (exit ${probe_status[0]})."
+  fi
+  ## In theory, tor-ctrl could error out but still print something that grep
+  ## can match.
+  if [ "${probe_status[1]}" -gt 1 ]; then
+    error_msg "reading the socket notice failed (grep exit ${probe_status[1]})."
+  fi
+fi
 
 list_circuits
