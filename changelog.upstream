@@ -1,3 +1,660 @@
+commit 60c298f2d9ae76dc64dfd887e77c182a1ee141ba
+Merge: f93b81d c84c811
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Sun Aug 30 10:24:16 2026 -0400
+
+    Merge remote-tracking branch 'refs/remotes/ArrayBolt3/arraybolt3/trixie'
+
+commit c84c811744a46fe9cbf29b98d6a246eaa719b788
+Author: Aaron Rainbolt <arraybolt3@gmail.com>
+Date:   Wed Aug 26 21:44:14 2026 -0400
+
+    Restore README.md, update README_generic.md, polish code and add FIXMEs
+
+commit 643f3fa9161a9f669be3c5e145e21e856c3b1075
+Merge: f93b81d 72759d7
+Author: Aaron Rainbolt <arraybolt3@gmail.com>
+Date:   Wed Aug 26 01:29:06 2026 -0400
+
+    Merge branch 'ai' into arraybolt3/trixie
+
+commit 72759d7ea7cc15f292950102183e2bcdcdff4915
+Author: claude (dev272 e8b76afb-795c-4739-8ebd-023de854021e) <noreply@anthropic.com>
+Date:   Fri Aug 21 03:14:38 2026 -0400
+
+    tor-ctrl: source helper-scripts via HELPER_SCRIPTS_PATH, drop SC1091 disable
+
+    - strings.bsh, has.sh, get_colors.sh, pad.bsh: use
+      source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/<f>; drop the
+      dead '# shellcheck disable=SC1091' and the stale 'Sibling repo absent' notes.
+    - .github/dm-consumer.yml: dist-ai-tests: helper-scripts: true, so the
+      pre-push-static gate checks out helper-scripts as the repo sibling and
+      shellcheck FOLLOWS the source (proven: 10 SC1091 without the sibling, 0
+      with it). See the shellcheck skill.
+
+    Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+commit eb01df8943cbb1391151ed743c9851e625eedc50
+Author: claude (dev165 6b2fcae5-ab58-4636-91b6-0eca317a86c6) <noreply@anthropic.com>
+Date:   Sat Aug 8 05:46:24 2026 -0400
+
+    README: reduce to the standard package README
+
+    Matches the shape every other derivative-maker package uses (sdwdate,
+    msgcollector, tor-control-panel): what it is, apt install, build from source,
+    contact, donate. 278 lines to 73.
+
+    Dropped: table of contents, history, configuration walkthrough, usage examples,
+    debugging section, and the manual "install on any unix system" procedure. The
+    manual procedure was also wrong -- it copied only usr/bin while the scripts
+    source /usr/libexec/tor-ctrl/pad.bsh and three helper-scripts libraries under
+    errexit, so two commands failed to start. Removing it removes that trap rather
+    than documenting around it; apt and dpkg-buildpackage place every path correctly.
+
+    Usage now points at 'man tor-ctrl' plus '-h'. Verified all four companion
+    commands respond to '-h': tor-ctrl-circuit, tor-ctrl-stream, tor-ctrl-observer,
+    tor-ctrl-onion. Only tor-ctrl.8 exists, so the README does not promise man pages
+    for the others.
+
+    Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+commit ea0579ca0f135403b1c22803fc3a7985c65753c9
+Author: claude (dev165 6b2fcae5-ab58-4636-91b6-0eca317a86c6) <noreply@anthropic.com>
+Date:   Sat Aug 8 05:35:07 2026 -0400
+
+    README: standalone install must also place usr/libexec and helper-scripts
+
+    The standalone procedure copies only usr/bin, but tor-ctrl-circuit and
+    tor-ctrl-stream source /usr/libexec/tor-ctrl/pad.bsh, and every script sources
+    strings.bsh / has.sh / get_colors.sh from /usr/libexec/helper-scripts. Sourcing
+    happens under errexit, so a missing library aborts before any argument is parsed
+    -- the command does not degrade, it fails to start.
+
+    Verified at the REAL paths, since the source lines are absolute and a temp prefix
+    cannot exercise them:
+
+      usr/bin only            tor-ctrl PASS, tor-ctrl-circuit FAIL, tor-ctrl-stream FAIL,
+                              tor-ctrl-onion PASS
+                              line 35: /usr/libexec/tor-ctrl/pad.bsh: No such file or directory
+      usr/bin + usr/libexec   all four start
+
+    helper-scripts added to Requirements: the Debian package already depends on it,
+    so only the standalone path was undocumented.
+
+    Found by coderabbit on PR #2, which reported the pad.bsh half; the helper-scripts
+    libraries have the same failure mode and are covered here too.
+
+    Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+commit 1024e779a423c673a80ac16ab14670927473405e
+Author: claude (dev165 6b2fcae5-ab58-4636-91b6-0eca317a86c6) <noreply@anthropic.com>
+Date:   Sat Aug 8 05:03:59 2026 -0400
+
+    tor-ctrl-onion: correct the -n comment to match the code
+
+    The comment at the ONION_CLIENT_AUTH_ADD call states that '-n' sets
+    permanent_auth but the call does not persist the authorization, calling the flag
+    a no-op. The call does send 'Flags=Permanent', so the comment contradicts the
+    line directly below it and would send the next reader hunting a bug that is not
+    there.
+
+    Per control-spec the command takes an optional trailing 'Flags=' argument, with
+    'Permanent' its only value:
+
+      "ONION_CLIENT_AUTH_ADD" SP HSAddress SP KeyType ":" PrivateKeyBlob
+                              [SP "ClientName=" Nickname] [SP "Flags=" TYPE] CRLF
+
+    Verified against a real tor started by the test on a private DataDirectory,
+    ControlPort and ClientOnionAuthDir with DisableNetwork -- never a system tor and
+    never a production onion. tor answers 250 OK in both cases, so the assertion is
+    the ClientOnionAuthDir, not the exit status:
+
+      ephemeral (no -n)   250 OK, ClientOnionAuthDir stays empty
+      permanent (-n)      250 OK, <onion>.auth_private written, records x25519
+
+    Against the previous no-op the permanent case fails, so the test detects the bug
+    rather than passing vacuously. Suite: dist-ai tor-ctrl-tests.
+
+    Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+commit 3a6da3fc747704e816a67f0087c4e3bbf44db130
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Sat Aug 8 04:56:54 2026 -0400
+
+    CI: enrol in the pre-push static gate
+
+    This repo had no GitHub Actions workflow at all, so nothing verified its PRs on
+    the server side -- the only gate was ci-repro run locally.
+
+    The workflow file is the canonical consumer template, copied verbatim from
+    developer-meta-files/consumer-templates/.github/workflows/. It is managed: once
+    present, dm-packaging-helper-script's pkg_update_consumer_workflows keeps it in
+    sync, so it must not be hand-edited here.
+
+    Enrolment is deliberately a SEPARATE act from propagation: that function uses
+    pkg_update_if_exists, which only updates a workflow that already exists, and
+    pkg_install_dependabot_yml skips any repo with no .github/workflows/ directory.
+    Neither creates the first one. Hence this commit.
+
+    Scope: the repos this session actually changed and that ship shell code -- not
+    every repo lacking CI. Enrolling a repo consumes shared org-wide Actions
+    concurrency (20 jobs, the real limit; public repos are not minute-billed), so it
+    is worth spending where there is signal.
+
+    Verified BEFORE enrolling: 'ci-repro.sh --worktree' passes for this repo, so the
+    gate arrives green rather than turning someone's PR red on arrival.
+
+    NOTE, so it is not a surprise: creating .github/workflows/ makes this repo
+    eligible for the canonical .github/dependabot.yml on the next propagation pass,
+    which pkg_install_dependabot_yml installs into any repo that uses Actions.
+
+commit 31c3165b63eb31fe4913696ebbcf708b12124319
+Author: claude (dev165 6b2fcae5-ab58-4636-91b6-0eca317a86c6) <noreply@anthropic.com>
+Date:   Sat Aug 8 04:38:50 2026 -0400
+
+    tor-ctrl: stop no-match greps aborting under errexit; refuse the unimplemented -n
+
+    Addresses the four open coderabbit threads on PR #2.
+
+    login() aborted before its own diagnostic. Three command substitutions ended in a
+    grep whose no-match is a state the code is written to handle, so under
+    errexit+pipefail they aborted instead:
+
+    - the PROTOCOLINFO AUTH grep -- without it the "Authentication method not
+      detected" block, which exists for exactly this case, was unreachable;
+    - the SAFECOOKIE and COOKIE method greps, whose '[ -n ]' tests below are written
+      for the absent case.
+
+    Audited the same class repo-wide rather than fixing only the reported line: the
+    optional-field extractions in tor-ctrl-circuit (relay host, bandwidth) and
+    tor-ctrl-stream (stream purpose, client, target hostname, relay host, bandwidth)
+    had it too. codex flagged tor-ctrl-stream:140-141 independently.
+
+    tor-ctrl-circuit socket probe: '|| true' also swallowed a FAILING tor-ctrl query,
+    the one thing that probe reports on. Capture PIPESTATUS and tolerate only the
+    documented case -- tor-ctrl succeeded and grep matched nothing.
+
+    tor-ctrl-onion '-n': documented as the permanent flag, but nothing sends
+    'Flags=Permanent', so credentials were ephemeral while the usage text promised
+    filesystem storage. Implementing it writes client credentials to disk and needs
+    verification against a real onion service, which is out of scope here, so it now
+    fails loudly instead of silently downgrading. Silent wrong behaviour is worse
+    than an unavailable option: the caller believed their authorization survived a
+    tor restart. Usage text marked NOT IMPLEMENTED; the dead initialiser is gone.
+
+    bash 4.4 requirement recorded in README Requirements and at the strict-mode block.
+    Not a package dependency: bash is Essential in Debian and every supported release
+    ships 5.x, so a versioned dependency could never fail; it constrains standalone
+    use on other unix systems, which is where it is now documented.
+
+    Verified under the scripts' own strict mode, each form in its own 'bash -c' with
+    the harness free of errexit so an abort is observable:
+
+      auth grep, no AUTH line     unguarded exit=1 (aborted)  guarded exit=0, diagnostic reached
+      SAFECOOKIE absent           unguarded exit=1 (aborted)  guarded exit=0, test reached
+      SAFECOOKIE present          guarded returns SAFECOOKIE
+      probe: match / no match     exit=0, continues
+      probe: upstream fails       exit=1, reports the exit status
+      tor-ctrl-onion -n           exit=1 with the refusal message
+
+    tor-ctrl-observer has the same optional-field pattern but is NOT touched here: it
+    carries no strict-mode block yet, so the pattern cannot abort there, and editing
+    it would pull its whole conversion into this change.
+
+    Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+commit ebde479d59a6d90309af944d7d6ef7f0be9f6119
+Author: claude (dev165 6b2fcae5-ab58-4636-91b6-0eca317a86c6) <noreply@anthropic.com>
+Date:   Fri Aug 7 19:51:18 2026 -0400
+
+    tor-ctrl-stream: keep '|| true' inside the locale command substitution
+
+    The closing ')' sat before '|| true', so the substitution ended early and
+    '|| true)' became literal text in the value instead of guarding the pipeline.
+    Two defects, both confirmed by repro under the script's own strict mode:
+
+    - A mapped country produced 'us || true)' rather than 'us'.
+    - A relay tor cannot map still aborted the whole listing (exit 1), which is
+      exactly what the comment above the line says the '|| true' prevents.
+
+    tor-ctrl-circuit already has the correct form; this brings the two in step.
+    Repo-wide grep finds no other instance of the pattern.
+
+    Found by codex during an unrelated review.
+
+    Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+commit 6fa277ba42dcf89ddcbd2267556af938f5a91736
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Fri Aug 7 15:20:36 2026 -0400
+
+    tor-ctrl: no ANSI on a redirected stdout; auth_string default
+
+    Colour on the wrong descriptor
+    ------------------------------
+
+    get_colors.sh decides by testing fd 2 -- its own '! test -t 2'. tor-ctrl-stream
+    and tor-ctrl-circuit write the palette to fd 1. So piping stdout into a file or
+    another program, while stderr merely happened to be a terminal, put escape bytes
+    into reports and machine-readable output.
+
+    This is a regression from the get_colors.sh port, and the two scripts started
+    from opposite places:
+      tor-ctrl-stream   had nocolor="" and bold=""  -- colour OFF unconditionally
+      tor-ctrl-circuit  had nocolor="\033[0m" etc.  -- colour ON unconditionally
+    Both now key off stderr while printing to stdout, which is wrong either way.
+
+    The palette still comes from get_colors.sh; nothing is reimplemented. The gate
+    applies that file's own tty rule to the descriptor the colours actually land on.
+
+    auth_string
+    -----------
+
+    Assigned only inside the branches that pick an authentication method, and read
+    unconditionally after them. When Tor offers nothing this caller can use --
+    HASHEDPASSWORD with no -p, or COOKIE with an unreadable cookie -- none fires and
+    the '-z' test aborted, instead of printing the "no supported auth method"
+    message that exists for exactly that case.
+
+    Found by codex.
+
+    Testing
+    -------
+
+    Gate exit 0 in an ISOLATED checkout.
+
+      2 pass, 0 fail
+
+      tor-ctrl-stream:  piped stdout stays plain
+      tor-ctrl-circuit: piped stdout stays plain
+
+    Canary: removing the gate from both gives 0 pass / 2 fail.
+
+    That canary took four attempts, and each failure is a way this test could have
+    shipped proving nothing:
+    - the stub replicated get_colors.sh's own 'test -t 2'. Under the runner stderr
+      is NOT a tty, so the stub blanked the palette by itself and the case passed
+      no matter what the script did. It reported 2 pass before the gate existed.
+    - the extraction ran from the 'source' line to the next '^fi$'. With the gate
+      removed that swallowed 219 lines of unrelated script, so the canary DIED
+      rather than failing. It is anchored on the gate itself now, so a missing gate
+      contributes nothing and the case fails.
+    - the stub used bold="\033[1m". Inside a double-quoted bash assignment that is a
+      literal backslash-0-3-3, not an ESC byte, and the two scripts differ in
+      whether they print with %s or %b -- so searching the output for escape bytes
+      could never match. It uses a sentinel and asserts the palette was BLANKED,
+      which is the actual property.
+    - the driver printed the whole palette, failing every case on 'yellow', which
+      tor-ctrl-stream does not use. Each case now names its own variables.
+
+commit 782f60933e0cce829c8315567b2eebed7f46eda3
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Fri Aug 7 14:47:11 2026 -0400
+
+    declare helper-scripts: get_colors.sh is sourced unconditionally
+
+    The get_colors.sh port replaced inline 'tput' colour handling with a source of
+    another package's file. It did not declare the new dependency, so on a minimal
+    install the affected commands exit at the source line -- a breakage introduced
+    by the port itself, not a pre-existing one.
+
+    Affected, and introduced here:
+      kicksecure-base-files  usr/bin/kicksecure
+      whonix-base-files      usr/bin/whonix
+      tor-ctrl               usr/bin/tor-ctrl-circuit, usr/bin/tor-ctrl-stream
+
+    None of the three had any path to helper-scripts in Depends.
+
+    systemcheck is also included, but was NOT broken: its six check_*.bsh files
+    already sourced get_colors.sh before this work, and it reaches helper-scripts
+    transitively through dist-base-files. A direct unconditional source still
+    deserves a direct dependency.
+
+    user-sysmaint-split is deliberately NOT changed. Its one source is in
+    profile.d_20_sysmaint_warn.sh and carries '|| true', so it degrades instead of
+    failing -- and it runs in every login shell, where failing closed would be far
+    worse.
+
+    Found by codex, on whonix-base-files only. The other packages came from grepping
+    for the same pattern.
+
+    Testing
+    -------
+
+    A cross-package check rather than a per-package one, since the omission can
+    recur in any package that adopts get_colors.sh:
+
+      7 package(s) source get_colors.sh unguarded; fail=0
+
+    It only considers UNGUARDED sources -- a '||' fallback is exempt, which is what
+    excludes user-sysmaint-split -- and it refuses to pass when it finds no sources
+    at all, so a wrong path reports failure rather than a silent green.
+
+    Canary: removing helper-scripts from whonix-base-files gives
+      FAIL: whonix/whonix-base-files  sources get_colors.sh unguarded but does NOT
+            declare helper-scripts
+            usr/bin/whonix
+    and exits 1.
+
+commit 1997cf9610d9f14904dfc4bfcfbec9bfa1234c6c
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Fri Aug 7 14:38:23 2026 -0400
+
+    tor-ctrl: three no-match pipelines aborted under pipefail
+
+    All three grep a source where NO match is the ordinary case, and each already
+    had an empty-value guard downstream. Under pipefail the abort happened first, so
+    the guard never ran.
+
+    usr/bin/tor-ctrl, get_socket
+    ----------------------------
+
+    - The '--verify-config' pipeline. The comment directly above it already says not
+      to evaluate that exit code, because tor exits non-zero whenever it is not run
+      as root or the tor user -- which is the normal case for tor-ctrl. pipefail
+      made exactly that fatal, so the function aborted before ANY discovery ran.
+    - The ControlPort / ControlSocket grep. A torrc defining neither is the DEFAULT
+      Debian configuration, so no-match is the common case; 'head -n 1' also closes
+      the pipe early, which pipefail reports as failure on its own.
+
+    Together these meant the documented fallback to 127.0.0.1:9051 was unreachable.
+
+    usr/bin/tor-ctrl-stream
+    -----------------------
+
+    The per-stream circuit lookup. A CLOSED or SUCCEEDED stream whose circuit has
+    already gone from 'GETINFO circuit-status' -- including every stream with
+    circuit ID 0 -- makes the grep match nothing. The handler for that is the
+    '[ -z "${circuit_status}" ] && break' on the next line. Aborting instead stopped
+    reporting there and omitted every later stream.
+
+    Found by codex.
+
+    Testing
+    -------
+
+    Gate exit 0 in an ISOLATED checkout.
+
+    get_socket driven directly against a fixture torrc, with a stub tor that exits 1
+    the way the real one does for a non-root caller:
+
+      3 pass, 0 fail
+
+      torrc with NO ControlPort/ControlSocket   old ABORTS, new socket=[]
+      torrc WITH a ControlPort is still found   old ABORTS, new socket=[9051]
+      verify-config prints nothing at all       old ABORTS, new socket=[]
+
+    All three assert the OLD version aborts and the new one does not, AND what the
+    new one produced -- reaching the end is not enough, since a version that
+    discovers nothing would otherwise pass every case.
+
+    Canary: removing both '|| true' gives 0 pass / 3 fail.
+
+    One harness defect worth recording: get_socket reads
+    /lib/systemd/system/tor@default.service to set tor_start_command, so on any host
+    where that file exists the script runs the REAL tor and parses the REAL system
+    torrc -- the fixture is ignored and the case silently tests the host. It was
+    returning the host's /run/tor/control instead of the fixture's 9051. The harness
+    now binds /dev/null over that path, which makes 'test -f' false without touching
+    anything outside the namespace.
+
+commit 3e13ea5a89388c432c05d21997ce10a17c9ea44f
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Fri Aug 7 11:41:02 2026 -0400
+
+    tor-ctrl: fix six defects an external review found in the strict-mode pass
+
+    An ai-review pass over this branch found six real problems. Five were INTRODUCED
+    by adding errexit/pipefail; one is a pre-existing command injection. Each was
+    verified against the code before being acted on.
+
+    Why the existing harness missed all of them: its tor fixture runs with
+    'DisableNetwork 1', so there are no circuits and no streams -- the relay-table
+    and monitor code never executed at all. Sixteen cases passed while the paths
+    these defects live on were never reached.
+
+    1. COMMAND INJECTION (pre-existing, both files)
+    ------------------------------------------------
+
+      eval "${1}"="\"${value}\""
+
+    The shell expands the double quotes BEFORE eval parses the result, so a value
+    containing ';' or spaces is executed as further commands:
+    'tor-ctrl-onion -k "x; id"' ran 'id'. Now the value is escaped with
+    'printf -v ... %q' and single-quoted into the eval. Present in BOTH
+    usr/bin/tor-ctrl and usr/bin/tor-ctrl-onion -- the review believed tor-ctrl had
+    already been patched; it had not.
+
+    2. A relay with no country data killed the whole table
+    -------------------------------------------------------
+
+    tor omits the ip-to-country line for an IP it cannot map, so 'grep -F' exits 1.
+    Before strict mode relay_locale was simply empty and the row still printed;
+    under errexit it aborted the ENTIRE listing partway through. Fixed in
+    tor-ctrl-circuit and tor-ctrl-stream.
+
+    3. No open streams killed the monitor
+    --------------------------------------
+
+    tor-ctrl-stream's 'for ... in $(... | grep "^650 STREAM" ...)' aborts when the
+    grep matches nothing -- which is the normal state of a freshly started monitor.
+
+    4. ADD_ONION failures bypassed their own error message
+    -------------------------------------------------------
+
+    The pipeline captured '$?' on the NEXT line, so under errexit a failing
+    tor-ctrl or an empty grep killed the script before 'Failed to create onion'
+    could run.
+
+    5. A working telnet socket reported as refused
+    -----------------------------------------------
+
+    'printf | telnet | grep -q' -- grep -q exits at the first match and closes the
+    pipe, telnet takes SIGPIPE and exits 141, and pipefail then fails the whole
+    pipeline even though the connection SUCCEEDED. The output is now read into a
+    variable first.
+
+    6. 'grep -c' exits 1 on a count of zero
+    ----------------------------------------
+
+    finish() assigned 'counter="$(... | grep -c ...)"' and errexit aborted before
+    the comparison could set the exit status. The outcome happened to match, but
+    only by coincidence.
+
+    Testing
+    -------
+
+    Gate exit 0 in an ISOLATED checkout.
+
+    New regression suite, ~/strict-pass-tests/torctrl-test/test-review-fixes.sh:
+    17 pass, 0 fail. It covers each defect as a behaviour -- an injected ';' must
+    not execute, a value with spaces must round-trip, each grep-finds-nothing case
+    must reach the end of the script, a failing ADD_ONION must reach its error
+    check, and a live telnet socket must not be reported as refused -- plus an
+    assertion that each fix is actually present in the shipped file.
+
+    That last assertion earned its place immediately: it caught my own first attempt
+    at the circuit fix, which put '|| true' OUTSIDE the command substitution and
+    left a stray ')', so the locale column would have had ' || true)' appended to
+    every row. The gate passed it, because it is syntactically valid.
+
+    The existing checks are unchanged: 16 pass / 0 fail against a real tor
+    0.4.9.11, and 9 pass / 0 fail on padding equivalence.
+
+commit c37160ae7d6561c7f40b628553304eaa11d26e83
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Fri Aug 7 11:30:55 2026 -0400
+
+    tor-ctrl: use the shared get_colors.sh instead of inline ANSI escapes
+
+    tor-ctrl-circuit defined 'nocolor' and 'yellow' itself; tor-ctrl-stream had
+    'nocolor' and 'bold' commented out and hardcoded to empty, under a
+    '## TODO: colors versus stecho'. Both now source
+    /usr/libexec/helper-scripts/get_colors.sh, which resolves that TODO and gives
+    tor-ctrl-stream working colour for the first time.
+
+    Two behaviour changes, both improvements
+    -----------------------------------------
+
+    - tor-ctrl-circuit emitted its escape sequences UNCONDITIONALLY. get_colors.sh
+      suppresses colour when stderr is not a terminal, and also honours NO_COLOR,
+      ANSI_COLORS_DISABLED, TERM=dumb and TERM=unknown. This output is a relay
+      table people paste into forum posts and bug reports, so not embedding
+      terminal escapes when it is piped or redirected is the point.
+    - tor-ctrl-stream now HAS colour where it previously had two empty strings.
+
+    Also: the two warning lines move from "printf '%b'" to "printf '%s'".
+    get_colors.sh builds its values with 'printf -v', so the variables hold real
+    escape BYTES -- there is nothing left for %b to decode, and %b would
+    additionally interpret any backslash appearing in the message text itself.
+
+    Testing
+    -------
+
+    Gate exit 0 in an ISOLATED checkout.
+
+    Differential against a real tor 0.4.9.11 control port, 16 cases across all four
+    scripts, unchanged from the previous commits in this branch:
+
+      pre-change:  13 pass, 3 fail   (the 3 are the auth bug fixed earlier here)
+      post-change: 16 pass, 0 fail
+
+    Padding equivalence still byte-for-byte: 9 pass, 0 fail.
+
+commit a73c86d5256c8fdfac75f2be8376e08c49dfdd6e
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Fri Aug 7 09:29:05 2026 -0400
+
+    tor-ctrl: R-010 strict mode for circuit, stream and onion
+
+    Completes the package's bash scripts. tor-ctrl-observer is left out: it is a
+    POSIX 'sh' script, where shopt and pipefail do not exist, and how the eleven
+    standalone sh scripts across the tree should be treated is one decision to make
+    once rather than ad hoc here.
+
+    New usr/libexec/tor-ctrl/pad.bsh
+    -------------------------------
+
+    The relay tables used printf field widths ('%1s. %-40s %-15s %-19s (%-2s)
+    %9s'). R-030 requires the format string itself to be fixed, and a width
+    specifier is not that, so the padding moves into shell -- the same approach the
+    gated-tool coverage report already uses. pad_right and pad_left reproduce
+    printf's semantics including the part that is easy to get wrong: a value LONGER
+    than its field is printed in full, never truncated.
+
+    Sourced, so it carries a 'no-strict' waiver: a strict-mode block in a sourced
+    file changes the CALLING script's shell options. Installed by the existing
+    'usr/*' glob, so no packaging change.
+
+    Two latent bugs found and handled
+    ---------------------------------
+
+    - tor-ctrl-stream called error_msg, which it never defined. tor-ctrl-circuit
+      has the definition; stream did not, so its "Install tor-ctrl" path invoked a
+      command that does not exist. Added.
+
+    - tor-ctrl-onion's '-n' flag is documented as storing client credentials
+      permanently, but nothing ever reads permanent_auth, so ONION_CLIENT_AUTH_ADD
+      is sent without 'Flags=Permanent' and the credentials stay ephemeral. NOT
+      fixed here: implementing it writes credentials to disk, which needs
+      verification against a real onion service rather than a strict-mode pass. The
+      assignment now carries a comment saying so, and an SC2034 waiver so the dead
+      read is visible rather than silently linted away.
+
+    Also
+    ----
+
+    - 'case "${1}"' -> 'case "${1:-}"' and 'arg="${2}"' -> 'arg="${2:-}"' in
+      onion's option loop, which runs until the arguments are exhausted.
+    - Option flags and get_arg targets initialised to empty: 3 in circuit, 11 in
+      stream, 23 in onion. Every one is read through a '[ -n ]' / '[ -z ]' test, so
+      empty is what they expanded to before strict mode.
+    - IFS="$(printf '\n')" -> IFS=$'\n'. Command substitution strips trailing
+      newlines, so the old spelling had always produced the empty string.
+    - R-090 'command -v' -> 'has'. R-070 case arms. R-030/R-031 bare-newline
+      printfs given their explicit data argument.
+    - SC2248 waived on the two ADD_ONION calls: client_pub_key, max_streams and
+      flags are optional argument FRAGMENTS, each either empty or a whole
+      'Name=value' word. Quoting them would pass an empty argument and change the
+      command.
+
+    Testing
+    -------
+
+    Gate exit 0 in an ISOLATED checkout.
+
+    Runtime differential against a real tor 0.4.9.11 control port in the sandbox,
+    16 cases across all four scripts:
+      pre-change:  13 pass, 3 fail   (the 3 are the auth bug fixed in the previous
+                                      commit)
+      post-change: 16 pass, 0 fail
+
+    Padding equivalence, byte-for-byte against the printf field widths it replaces,
+    9 cases including empty fields, a 60-character fingerprint in a 40-wide column
+    and a two-digit hop in a 1-wide column: 9 pass, 0 fail. The runtime harness
+    checks exit codes and the absence of "unbound variable", so it would not have
+    noticed a column shifting by one space.
+
+commit 40da1d0188f1edeca6e484cda4636abba99df673
+Author: claude (dev163 38f9745c-aed1-4fb4-b6ae-9899f20f8de2) <noreply@anthropic.com>
+Date:   Fri Aug 7 09:18:08 2026 -0400
+
+    tor-ctrl: fix broken password authentication; R-010 strict mode for usr/bin/tor-ctrl
+
+    Bug: 'tor-ctrl -p <password>' never authenticated.
+
+    PROTOCOLINFO replies over the control port are CRLF-terminated, so the method
+    list parsed into auth_methods kept a trailing CR on its last entry. Every
+    subsequent test is an ANCHORED grep -- "^HASHEDPASSWORD$" -- which therefore
+    never matched, and password auth fell through to the "no supported method"
+    path. Cookie auth escaped this only because its COOKIEFILE= second field
+    carries the CR away, which is why the adjacent tor_cookie line already had its
+    own 'tr -d "\r"'.
+
+    Fix: strip the CR in the auth_methods pipeline, matching that adjacent line.
+
+    Also in usr/bin/tor-ctrl only:
+
+    - R-010 strict-mode preamble.
+    - Initialise the option flags and the socket variables to empty. Every one is
+      read through a '[ -n ]' / '[ -z ]' guard, so empty reproduces exactly what
+      non-strict bash expanded an unset name to. Two of them matter beyond
+      nounset: socket_prog and hex_prog are read by the '[ -z ]' guard that is
+      supposed to print "install one of the following programs", and under nounset
+      an unset read would have replaced that message with an abort.
+    - TOR_CONTROL_HOST stays empty rather than defaulting to 127.0.0.1: an empty
+      host with a set port is a supported case, handled by check_socket's own
+      '":"[0-9]*' arm.
+    - 'case "${1}"' -> 'case "${1:-}"' in the option loop, which runs until the
+      arguments are exhausted and so reads an unset $1 on its last iteration by
+      design.
+    - R-030: the telnet escape sequence moves out of printf's format into an
+      ANSI-C string, same bytes. IFS="$(printf '\n')" becomes IFS=$'\n' -- command
+      substitution strips trailing newlines, so the old spelling had always
+      produced the empty string rather than a newline (equivalent for a single
+      'read -r line', which is why it went unnoticed).
+    - R-090 waiver on 'command -v': that line is the definition of 'has'.
+    - SC2034 waiver on tor_socket, read indirectly through get_dry_run's eval loop.
+    - SC2250 braces.
+
+    tor-ctrl-circuit, tor-ctrl-stream and tor-ctrl-onion are deliberately NOT
+    touched: their aligned relay tables need a printf format R-030 does not permit,
+    which is a separate decision. The gate checks changed files, so leaving them
+    out lets the auth fix land now.
+
+    Testing: gate exit 0 in an ISOLATED checkout (CI's condition, not the live
+    tree). Runtime differential against a real tor 0.4.9.11 control port in the
+    sandbox, 16 cases covering every option, both auth methods and the
+    no-arguments paths:
+      pre-change:  13 pass, 3 fail  (the three failures ARE the auth bug)
+      post-change: 16 pass, 0 fail
+
+commit f93b81d3955ba0a0586246787e03869f43260ff1
+Author: Patrick Schleizer <adrelanos@whonix.org>
+Date:   Tue Jul 21 11:11:48 2026 +0000
+
+    bumped changelog version
+
 commit fbafac2d8a53c3554facc9bf1a2ac157ab0bee71
 Merge: ad5bcac c4c75c0
 Author: Patrick Schleizer <adrelanos@whonix.org>
